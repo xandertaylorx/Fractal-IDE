@@ -235,20 +235,25 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
         if text_rect.contains(p) && resp.hovered() {
             ctx.set_cursor_icon(if p.x < text_left { CursorIcon::Default } else { CursorIcon::Text });
         }
-        if pressed && text_rect.contains(p) && resp.hovered() {
+        // egui reports double/triple clicks on RELEASE, so they are handled here
+        if (dbl || tpl) && text_rect.contains(p) && p.x >= text_left - 2.0 && resp.hovered() {
+            let idx = pos_to_char(&tab.buf, p, tab.scroll_y, tab.scroll_x);
+            if tpl {
+                tab.buf.select_line_at(idx);
+            } else {
+                let (a, b) = tab.buf.word_range_at(idx);
+                tab.buf.set_selection(a, b);
+            }
+            tab.drag_anchor = None;
+            tab.reveal = false;
+            result.pressed = true;
+        } else if pressed && text_rect.contains(p) && resp.hovered() {
             result.pressed = true;
             let idx = pos_to_char(&tab.buf, p, tab.scroll_y, tab.scroll_x);
             if mods.command && !mods.alt && !mods.shift && !dbl && !tpl {
                 result.cmd_click = Some(idx);
             }
-            if tpl {
-                tab.buf.select_line_at(idx);
-                tab.drag_anchor = None;
-            } else if dbl {
-                let (a, b) = tab.buf.word_range_at(idx);
-                tab.buf.set_selection(a, b);
-                tab.drag_anchor = Some(a);
-            } else if mods.alt {
+            if mods.alt {
                 tab.buf.add_caret(idx);
                 tab.drag_anchor = Some(idx);
             } else if mods.shift {
@@ -311,7 +316,6 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
     }
 
     // --- painting ------------------------------------------------------
-    painter.rect_filled(rect, 0.0, c(ui_c.bg));
     let text_clip = Rect::from_min_max(egui::pos2(text_left, rect.top()), egui::pos2(text_right, rect.bottom()));
     let tp = painter.with_clip_rect(text_clip);
     let y_of = |line: usize| rect.top() + line as f32 * m.line_h - tab.scroll_y;
@@ -322,7 +326,7 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
     let (pl, pc) = tab.buf.char_to_pos(primary.head);
     if primary.is_empty() {
         let y = y_of(pl);
-        painter.rect_filled(Rect::from_min_size(egui::pos2(text_left, y), Vec2::new(text_w + sb_w, m.line_h)), 0.0, c(ui_c.line_highlight));
+        painter.rect_filled(Rect::from_min_size(egui::pos2(text_left - 6.0, y), Vec2::new(text_w + 6.0, m.line_h)), 5.0, c(ui_c.line_highlight));
     }
 
     // char range visible
@@ -346,7 +350,7 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
             }
             if e > s {
                 let r = Rect::from_min_max(egui::pos2(x_of(s), y_of(l)), egui::pos2(x_of(e), y_of(l) + m.line_h));
-                tp.rect_filled(r, 0.0, color);
+                tp.rect_filled(r, 2.5, color);
             }
         }
     };
@@ -524,9 +528,8 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
     let _ = pc;
 
     // gutter
-    painter.rect_filled(Rect::from_min_max(rect.min, egui::pos2(text_left, rect.bottom())), 0.0, c(ui_c.bg));
     let gp = painter.with_clip_rect(Rect::from_min_max(rect.min, egui::pos2(text_left, rect.bottom())));
-    let small = FontId::monospace((m.font.size - 1.5).max(9.0));
+    let small = FontId::monospace((m.font.size - 2.0).max(9.0));
     if env.line_numbers {
         for line in first_line..last_line {
             let active = tab.buf.sels.iter().any(|s| tab.buf.char_to_pos(s.head).0 == line);
@@ -572,8 +575,6 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
     if minimap_w > 0.0 {
         let mm = Rect::from_min_max(egui::pos2(rect.right() - minimap_w, rect.top()), rect.max);
         let mp = painter.with_clip_rect(mm);
-        mp.rect_filled(mm, 0.0, c(ui_c.bg));
-        mp.line_segment([mm.left_top(), mm.left_bottom()], egui::Stroke::new(1.0, c(ui_c.border)));
         let lh = 2.0;
         let cap = (mm.height() / lh) as usize;
         let mm_first = if n_lines > cap {
@@ -636,4 +637,60 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
         tab.scroll_y = (y - view_h / 3.0).clamp(0.0, max_scroll_y);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{Event, Modifiers, PointerButton, RawInput};
+
+    fn frame(ctx: &egui::Context, tab: &mut Tab, theme: &Theme, events: Vec<Event>, time: f64) -> (f32, f32) {
+        let mut raw = RawInput::default();
+        raw.time = Some(time);
+        raw.events = events;
+        raw.screen_rect = Some(Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(900.0, 600.0)));
+        let mut hit = (0.0, 0.0);
+        let mut out = ctx.run_ui(raw, |ui| {
+            let m = metrics(ui.ctx(), 14.0);
+            let env = EditorEnv { theme, metrics: &m, minimap: false, line_numbers: true, focused: true, caret_visible: true, find_matches: &[], find_current: None, ghost: None };
+            egui::CentralPanel::default().frame(egui::Frame::NONE).show_inside(ui, |ui| {
+                let _ = show(ui, tab, &env);
+            });
+            // a point inside the word "world" on line 0
+            let digits = 3.0;
+            let text_left = digits * m.char_w + 12.0 * 2.0 + 4.0;
+            hit = (text_left + 7.5 * m.char_w, m.line_h / 2.0);
+        });
+        out.textures_delta.clear();
+        hit
+    }
+
+    fn click(t: f64, pos: egui::Pos2) -> Vec<Event> {
+        let _ = t;
+        vec![
+            Event::PointerMoved(pos),
+            Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+            Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+        ]
+    }
+
+    #[test]
+    fn double_click_selects_word_triple_selects_line() {
+        let theme = fractal_core::theme::builtin("Nord").unwrap();
+        let ctx = egui::Context::default();
+        let buf = Buffer::from_text("hello world foo\nsecond line\n", None);
+        let mut tab = Tab::new(buf, &theme);
+        let (x, y) = frame(&ctx, &mut tab, &theme, vec![], 0.0);
+        let pos = egui::pos2(x, y);
+        frame(&ctx, &mut tab, &theme, vec![], 0.05);
+        // first click: caret only
+        frame(&ctx, &mut tab, &theme, click(1.0, pos), 1.0);
+        assert!(tab.buf.primary().is_empty(), "single click should only place the caret");
+        // second quick click: word
+        frame(&ctx, &mut tab, &theme, click(1.1, pos), 1.1);
+        assert_eq!(tab.buf.selected_text(), "world", "double-click must select the word");
+        // third quick click: whole line
+        frame(&ctx, &mut tab, &theme, click(1.2, pos), 1.2);
+        assert_eq!(tab.buf.selected_text(), "hello world foo\n", "triple-click must select the line");
+    }
 }

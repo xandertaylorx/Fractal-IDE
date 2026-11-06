@@ -149,7 +149,7 @@ fn find_replace() {
 fn highlighter_runs() {
     use fractal_core::{syntax::Highlighter2, theme};
     let b = buf("fn main() { let s = \"hi\"; }\n", "rs");
-    let th = theme::builtin("Fractal Dark").unwrap();
+    let th = theme::builtin("Fractal").unwrap();
     let mut h = Highlighter2::new(&b, &th);
     assert!(h.ensure(&b, 2, std::time::Duration::from_secs(1)));
     assert!(h.spans(0).unwrap().len() > 3);

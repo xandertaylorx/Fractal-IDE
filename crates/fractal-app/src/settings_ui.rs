@@ -2,7 +2,7 @@
 
 use crate::app::App;
 use crate::commands;
-use crate::ui_theme::{self, c};
+use crate::ui_theme::{self, c, medium, semibold};
 use eframe::egui::{self, Align, Align2, FontId, Layout, Sense, Stroke, TextEdit, Ui, Vec2};
 use fractal_core::theme::Theme;
 
@@ -30,9 +30,9 @@ fn row(ui: &mut Ui, t: &Theme, title: &str, desc: &str, control: impl FnOnce(&mu
     let w = ui.available_width();
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(Vec2::new((w - 240.0).max(160.0), 0.0), Layout::top_down(Align::LEFT), |ui| {
-            ui.label(egui::RichText::new(title).size(13.5).color(c(t.ui.fg)));
-            ui.add_space(1.0);
-            ui.label(egui::RichText::new(desc).size(12.0).color(c(t.ui.fg_dim)));
+            ui.label(egui::RichText::new(title).size(13.5).family(medium()).color(c(t.ui.fg)));
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new(desc).size(12.0).color(c(t.ui.fg_faint)));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), control);
     });
@@ -41,16 +41,16 @@ fn row(ui: &mut Ui, t: &Theme, title: &str, desc: &str, control: impl FnOnce(&mu
 }
 
 fn divider(ui: &mut Ui, t: &Theme) {
-    ui.add_space(8.0);
+    ui.add_space(10.0);
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(r, 0.0, c(t.ui.border));
-    ui.add_space(8.0);
+    ui.painter().rect_filled(r, 0.0, crate::shell::alpha(t.ui.fg, 12));
+    ui.add_space(10.0);
 }
 
 fn heading(ui: &mut Ui, t: &Theme, text: &str) {
-    ui.add_space(18.0);
-    ui.label(egui::RichText::new(text).size(15.0).strong().color(c(t.ui.fg)));
-    ui.add_space(6.0);
+    ui.add_space(30.0);
+    ui.label(egui::RichText::new(text.to_uppercase()).size(10.5).family(medium()).color(c(t.ui.accent_text())));
+    ui.add_space(8.0);
 }
 
 impl App {
@@ -72,7 +72,7 @@ impl App {
                 ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
                     ui.add_space(26.0);
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Settings").size(24.0).color(c(t.ui.fg)));
+                        ui.label(egui::RichText::new("Settings").size(26.0).family(semibold()).color(c(t.ui.fg)));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if crate::widgets::ghost_button(ui, &t, "Open settings.json").clicked() {
                                 open_json = true;

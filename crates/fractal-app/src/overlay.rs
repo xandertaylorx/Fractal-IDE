@@ -123,18 +123,18 @@ impl Overlay {
         }
 
         let screen = ctx.content_rect();
-        let width = 620.0f32.min(screen.width() - 40.0);
-        let pos = egui::pos2(screen.center().x - width / 2.0, screen.top() + 54.0);
+        let width = 640.0f32.min(screen.width() - 40.0);
+        let pos = egui::pos2(screen.center().x - width / 2.0, screen.top() + 72.0);
         egui::Area::new(egui::Id::new("overlay")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
             egui::Frame::NONE
-                .fill(c(u.bg_side))
-                .stroke(egui::Stroke::new(1.0, c(u.border)))
-                .corner_radius(egui::CornerRadius::same(12))
-                .shadow(egui::Shadow { offset: [0, 14], blur: 40, spread: 0, color: egui::Color32::from_black_alpha(if theme.dark { 170 } else { 60 }) })
-                .inner_margin(egui::Margin::same(8))
+                .fill(c(fractal_core::theme::mix(u.bg, u.fg, if theme.dark { 0.06 } else { 0.0 })))
+                .stroke(egui::Stroke::new(1.0, crate::shell::alpha(u.fg, 22)))
+                .corner_radius(egui::CornerRadius::same(16))
+                .shadow(egui::Shadow { offset: [0, 18], blur: 48, spread: 0, color: egui::Color32::from_black_alpha(if theme.dark { 190 } else { 60 }) })
+                .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
-                    ui.set_width(width - 16.0);
-                    let te = ui.add_sized([width - 16.0, 34.0], TextEdit::singleline(&mut self.input).hint_text(&self.placeholder).font(FontId::proportional(15.0)).margin(egui::Margin::symmetric(10, 8)).lock_focus(true));
+                    ui.set_width(width - 20.0);
+                    let te = ui.add_sized([width - 20.0, 38.0], TextEdit::singleline(&mut self.input).hint_text(&self.placeholder).font(FontId::proportional(15.5)).margin(egui::Margin::symmetric(12, 10)).frame(egui::Frame::NONE).lock_focus(true));
                     if self.first_frame {
                         te.request_focus();
                         self.first_frame = false;
@@ -153,7 +153,7 @@ impl Overlay {
                         }
                         return;
                     }
-                    let row_h = 30.0;
+                    let row_h = 34.0;
                     let n = self.visible.len();
                     let list_h = (n as f32 * row_h).min(row_h * 10.0);
                     let list = self.current_list().clone();
@@ -166,15 +166,11 @@ impl Overlay {
                             let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
                             let sel = vi == self.selected;
                             if sel {
-                                ui.painter().rect_filled(rect, 6.0, c(u.selection));
+                                ui.painter().rect_filled(rect, 9.0, crate::shell::alpha(u.accent, 38));
                             } else if resp.hovered() {
-                                ui.painter().rect_filled(rect, 6.0, c(u.bg_hover));
+                                ui.painter().rect_filled(rect, 9.0, crate::shell::alpha(u.fg, 10));
                             }
-                            let mut tx = rect.left() + 12.0;
-                            if let Payload::File(p) = &it.payload {
-                                crate::icons::draw_file(ui.painter(), crate::icons::file_icon_key(p, false, false), egui::pos2(tx + 8.0, rect.center().y), 16.0);
-                                tx += 26.0;
-                            }
+                            let tx = rect.left() + 14.0;
                             let g = ui.painter().text(egui::pos2(tx, rect.center().y), Align2::LEFT_CENTER, &it.label, FontId::proportional(13.5), c(u.fg));
                             if !it.detail.is_empty() {
                                 ui.painter().with_clip_rect(rect).text(egui::pos2(g.right() + 10.0, rect.center().y), Align2::LEFT_CENTER, &it.detail, FontId::proportional(12.0), c(u.fg_faint));

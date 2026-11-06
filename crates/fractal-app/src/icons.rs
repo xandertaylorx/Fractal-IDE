@@ -149,7 +149,7 @@ pub fn draw(p: &Painter, icon: Icon, center: Pos2, size: f32, color: Color32) {
     let name = icon.name();
     let filled = icon.filled();
     let tex = texture(p.ctx(), &format!("ui:{name}:{filled}"), px, || {
-        let mut svg = assets::ui_svg(name)?.replace("currentColor", "#ffffff").replace("stroke-width=\"2\"", "stroke-width=\"1.8\"");
+        let mut svg = assets::ui_svg(name)?.replace("currentColor", "#ffffff").replace("stroke-width=\"2\"", "stroke-width=\"1.5\"");
         if filled {
             svg = svg.replace("fill=\"none\"", "fill=\"#ffffff\"");
         }

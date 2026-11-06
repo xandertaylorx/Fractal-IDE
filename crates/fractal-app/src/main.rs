@@ -13,6 +13,7 @@ mod overlay;
 mod scm;
 mod search_panel;
 mod settings_ui;
+mod shell;
 mod terminal;
 mod ui;
 mod ui_theme;

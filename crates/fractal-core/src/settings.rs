@@ -20,6 +20,9 @@ pub struct Settings {
     pub format_on_save: bool,
     pub suggestions: bool,
     pub ghost_text: bool,
+    /// Bumped when the default look changes so old saved themes get reset once.
+    #[serde(default)]
+    pub look_version: u32,
 }
 
 impl Default for Settings {
@@ -39,6 +42,7 @@ impl Default for Settings {
             format_on_save: false,
             suggestions: true,
             ghost_text: false,
+            look_version: LOOK_VERSION,
         }
     }
 }
@@ -75,13 +79,23 @@ pub fn themes_dir() -> PathBuf {
     d
 }
 
+pub const LOOK_VERSION: u32 = 2;
+
 impl Settings {
     pub fn load() -> Self {
-        std::fs::read_to_string(settings_path())
+        let mut s: Settings = std::fs::read_to_string(settings_path())
             .ok()
             .and_then(|s| crate::jsonc::parse(&s))
             .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if s.look_version < LOOK_VERSION {
+            // the redesign ships a new default look: reset the saved theme once
+            s.theme = crate::theme::DEFAULT_THEME.into();
+            s.ghost_text = false;
+            s.look_version = LOOK_VERSION;
+            s.save();
+        }
+        s
     }
 
     pub fn save(&self) {

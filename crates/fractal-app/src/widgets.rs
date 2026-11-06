@@ -29,9 +29,9 @@ pub fn small_toggle(ui: &mut Ui, theme: &Theme, icon: Icon, tip: &str, on: &mut 
     resp.on_hover_text(tip)
 }
 
-pub fn section_header(ui: &mut Ui, theme: &Theme, title: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
-    ui.painter().text(egui::pos2(rect.left() + 12.0, rect.center().y), Align2::LEFT_CENTER, title.to_uppercase(), FontId::proportional(11.0), c(theme.ui.fg_dim));
+pub fn section_header(ui: &mut Ui, _theme: &Theme, _title: &str) {
+    // the sidebar's text tabs already name the view
+    ui.add_space(2.0);
 }
 
 /// A filled accent button.

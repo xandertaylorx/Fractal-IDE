@@ -158,8 +158,7 @@ impl Term {
         self.resize(rows, cols);
         let painter = ui.painter_at(rect);
         let u = &theme.ui;
-        let default_bg = c(u.bg_panel);
-        painter.rect_filled(rect, 0.0, default_bg);
+        let default_bg = c(u.bg);
 
         // scrolling
         if resp.hovered() {

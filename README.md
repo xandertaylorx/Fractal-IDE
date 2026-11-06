@@ -8,7 +8,8 @@ A fast, minimal, modern code editor written in Rust, with VS Code muscle memory.
 - **Smart editing:** Tab-to-complete suggestions with inline ghost text (identifiers from your code and open files, language keywords, snippets), auto-closing brackets/quotes/HTML tags, select text and type `"` `(` `[` `{` `` ` `` to wrap it, `⌘/` line comment, `⇧⌥A` block comment, `⌘⇧F` **Format Document** (uses rustfmt/prettier/black/ruff/gofmt/clang-format when installed, otherwise a built-in formatter).
 - **Settings:** click the gear for a GUI settings page, right-click it for `settings.json`. Edits to either apply live.
 - **Integrated terminal** (PTY + VT emulation), **Git** (status, stage/unstage/discard, commit, push/pull, branches, gutter marks, diffs), **project search & replace**.
-- **Looks like VS Code, runs like Zed:** ships the official **Dark Modern / Light Modern / Dark+ / Light+** themes plus 20 more, and imports any **VS Code color theme** JSON. Icons are [Lucide](https://lucide.dev) (UI) and [Material Icon Theme](https://github.com/PKief/vscode-material-icon-theme) (files), rendered from SVG. TextMate grammars for ~100 languages.
+- **A look of its own:** floating rounded panels on a darker base, text tabs instead of icon strips, Geist type, one signal-orange accent, no hairline borders. Default themes are **Fractal** (dark) and **Fractal Paper** (light).
+- **Familiar where it counts:** ships the official **Dark Modern / Light Modern / Dark+ / Light+** themes plus 20 more, and imports any **VS Code color theme** JSON. Icons are [Lucide](https://lucide.dev) (UI) and [Material Icon Theme](https://github.com/PKief/vscode-material-icon-theme) (files), rendered from SVG. TextMate grammars for ~100 languages.
 - GPU rendered (wgpu/Metal), virtualized editor, minimap, indent guides.
 
 ## Build & run (macOS)

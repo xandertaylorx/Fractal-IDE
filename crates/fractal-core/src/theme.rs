@@ -8,6 +8,8 @@ pub type Rgba = [u8; 4];
 
 #[derive(Clone, Debug)]
 pub struct UiColors {
+    /// Window background behind the floating panels.
+    pub bg_base: Rgba,
     pub bg: Rgba,
     pub bg_side: Rgba,
     pub bg_panel: Rgba,
@@ -105,8 +107,8 @@ struct Palette {
 
 #[rustfmt::skip]
 const PALETTES: &[Palette] = &[
-    Palette { name: "Fractal Dark", dark: true, bg: "#14161b", side: "#101216", fg: "#d4d7de", comment: "#5f6877", string: "#8fd694", number: "#f2a65a", keyword: "#b79cff", func: "#6cb6ff", ty: "#4fd1c5", var: "#d4d7de", op: "#89a0b8", tag: "#ff7b9c", attr: "#f2a65a", accent: "#8b7cff", sel: "#33306b" },
-    Palette { name: "Fractal Light", dark: false, bg: "#fbfbfd", side: "#f1f2f6", fg: "#2b2f3a", comment: "#9aa1b0", string: "#2f8f4e", number: "#c2641b", keyword: "#6d4fd6", func: "#1f6fd1", ty: "#0e8a7f", var: "#2b2f3a", op: "#5c6b80", tag: "#d1365f", attr: "#b8601a", accent: "#6d4fd6", sel: "#d9d2ff" },
+    Palette { name: "Fractal", dark: true, bg: "#181a20", side: "#15171c", fg: "#d9dce1", comment: "#596070", string: "#9ccba2", number: "#e8b774", keyword: "#ff8d58", func: "#eceef2", ty: "#86b5d6", var: "#d9dce1", op: "#8a92a1", tag: "#ff8d58", attr: "#e8b774", accent: "#ff7a3d", sel: "#2d313a" },
+    Palette { name: "Fractal Paper", dark: false, bg: "#fbfaf7", side: "#f3f1ec", fg: "#25272c", comment: "#9b9a94", string: "#4c8a58", number: "#ad6a1a", keyword: "#d4501a", func: "#17181b", ty: "#3b76a6", var: "#25272c", op: "#767a83", tag: "#d4501a", attr: "#ad6a1a", accent: "#e5591a", sel: "#e8e3d7" },
     Palette { name: "Midnight", dark: true, bg: "#000000", side: "#050507", fg: "#d0d0d0", comment: "#555b66", string: "#7fdc8a", number: "#ffb86b", keyword: "#c792ff", func: "#64b5ff", ty: "#5de4c7", var: "#d0d0d0", op: "#89a0b8", tag: "#ff6b9d", attr: "#ffb86b", accent: "#00d4ff", sel: "#1d2b4a" },
     Palette { name: "Tokyo Night", dark: true, bg: "#1a1b26", side: "#16161e", fg: "#a9b1d6", comment: "#565f89", string: "#9ece6a", number: "#ff9e64", keyword: "#bb9af7", func: "#7aa2f7", ty: "#2ac3de", var: "#c0caf5", op: "#89ddff", tag: "#f7768e", attr: "#e0af68", accent: "#7aa2f7", sel: "#283457" },
     Palette { name: "Catppuccin Mocha", dark: true, bg: "#1e1e2e", side: "#181825", fg: "#cdd6f4", comment: "#6c7086", string: "#a6e3a1", number: "#fab387", keyword: "#cba6f7", func: "#89b4fa", ty: "#f9e2af", var: "#cdd6f4", op: "#89dceb", tag: "#f38ba8", attr: "#f9e2af", accent: "#cba6f7", sel: "#45475a" },
@@ -127,7 +129,7 @@ const PALETTES: &[Palette] = &[
     Palette { name: "Synthwave '84", dark: true, bg: "#262335", side: "#1e1b2b", fg: "#f0eff1", comment: "#848bbd", string: "#ff8b39", number: "#f97e72", keyword: "#fede5d", func: "#36f9f6", ty: "#fe4450", var: "#ff7edb", op: "#fede5d", tag: "#72f1b8", attr: "#fede5d", accent: "#ff7edb", sel: "#463465" },
 ];
 
-pub const DEFAULT_THEME: &str = "Dark Modern";
+pub const DEFAULT_THEME: &str = "Fractal";
 
 pub fn builtin_names() -> Vec<&'static str> {
     PALETTES.iter().map(|p| p.name).collect()
@@ -181,7 +183,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
         item("markup.inserted", Some(hex("#7fd88a")), n),
         item("markup.deleted", Some(hex("#ff6b7a")), n),
     ];
+    let base = if p.dark { mix(side, [0, 0, 0, 255], 0.62) } else { mix(side, [0, 0, 0, 255], 0.08) };
     let ui = UiColors {
+        bg_base: base,
         bg,
         bg_side: side,
         bg_panel: mix(bg, side, 0.5),
@@ -289,7 +293,7 @@ pub fn from_vscode_json_with(src: &str, fallback_name: &str, resolver: &dyn Fn(&
         Some("dark") | Some("hc") | Some("hc-black") => true,
         _ => bg_lum.map_or(true, |l| l < 0.5),
     };
-    let base = builtin(if dark { "Fractal Dark" } else { "Fractal Light" })?;
+    let base = builtin(if dark { "Fractal" } else { "Fractal Paper" })?;
     let colors = v.get("colors").and_then(|c| c.as_object());
     let get = |keys: &[&str]| -> Option<Rgba> {
         let c = colors?;
@@ -304,6 +308,7 @@ pub fn from_vscode_json_with(src: &str, fallback_name: &str, resolver: &dyn Fn(&
         let fg = get(&["editor.foreground", "foreground"]).unwrap_or(ui.fg);
         let accent = get(&["button.background", "focusBorder", "activityBarBadge.background", "textLink.foreground"]).unwrap_or(ui.accent);
         ui.bg = bg;
+        ui.bg_base = if dark { mix(side, [0, 0, 0, 255], 0.45) } else { mix(side, [0, 0, 0, 255], 0.06) };
         ui.bg_side = side;
         ui.bg_title = side;
         ui.bg_status = side;

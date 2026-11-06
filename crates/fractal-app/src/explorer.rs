@@ -145,29 +145,7 @@ impl Explorer {
         let Some(root) = self.root.clone() else { return actions };
         let u = &theme.ui;
         let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        // header
-        let (hr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
-        ui.painter().text(egui::pos2(hr.left() + 12.0, hr.center().y), Align2::LEFT_CENTER, name.to_uppercase(), FontId::proportional(11.0), c(u.fg_dim));
-        let mut hx = hr.right() - 8.0;
-        let header_hot = ui.rect_contains_pointer(hr);
-        for (icon, tip, dir) in [(Icon::Refresh, "Refresh", None), (Icon::FolderPlus, "New Folder", Some(true)), (Icon::FilePlus, "New File", Some(false))] {
-            hx -= 22.0;
-            let r = egui::Rect::from_center_size(egui::pos2(hx + 11.0, hr.center().y), Vec2::splat(22.0));
-            let resp = ui.interact(r, ui.id().with(tip), Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(r, 4.0, c(u.bg_hover));
-            }
-            if header_hot || resp.hovered() {
-                icons::draw(ui.painter(), icon, r.center(), 14.0, c(u.fg_dim));
-            }
-            if resp.on_hover_text(tip).clicked() {
-                match dir {
-                    None => self.cache.clear(),
-                    Some(d) => self.start_create(d),
-                }
-            }
-        }
-
+        ui.add_space(2.0);
         let mut rows: Vec<(Entry, usize)> = vec![];
         self.flatten(&root, 0, &mut rows);
         // insert create row
@@ -184,7 +162,7 @@ impl Explorer {
             }).unwrap_or(0);
             create_at = Some((idx, depth));
         }
-        let row_h = 22.0;
+        let row_h = 27.0;
         let total = rows.len() + create_at.is_some() as usize;
         let mut toggle: Option<PathBuf> = None;
         let mut open: Option<PathBuf> = None;
@@ -210,7 +188,7 @@ impl Explorer {
                     let (r, rr) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
                     rect = r;
                     resp = rr;
-                    let inner = egui::Rect::from_min_max(egui::pos2(rect.left() + 12.0 + depth as f32 * 14.0 + 18.0, rect.top() + 1.0), egui::pos2(rect.right() - 6.0, rect.bottom() - 1.0));
+                    let inner = egui::Rect::from_min_max(egui::pos2(rect.left() + 18.0 + depth as f32 * 14.0 + 18.0, rect.top() + 1.0), egui::pos2(rect.right() - 10.0, rect.bottom() - 1.0));
                     let (_, is_dir, buf) = self.creating.as_mut().unwrap();
                     let te = ui.put(inner, TextEdit::singleline(buf).hint_text(if *is_dir { "folder name" } else { "file name" }).lock_focus(true));
                     if self.focus_edit {
@@ -234,17 +212,20 @@ impl Explorer {
                 resp = rr;
                 let is_sel = self.selected.as_ref() == Some(&entry.path);
                 let is_active = active == Some(entry.path.as_path());
-                if is_sel || is_active {
-                    ui.painter().rect_filled(rect, 0.0, if is_active { c(u.selection).gamma_multiply(0.55) } else { c(u.bg_hover) });
+                let hl = egui::Rect::from_min_max(egui::pos2(rect.left() + 8.0, rect.top() + 1.0), egui::pos2(rect.right() - 8.0, rect.bottom() - 1.0));
+                if is_active {
+                    ui.painter().rect_filled(hl, 7.0, crate::shell::alpha(u.accent, 34));
+                } else if is_sel {
+                    ui.painter().rect_filled(hl, 7.0, crate::shell::alpha(u.fg, 16));
                 } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, 0.0, c(u.bg_hover).gamma_multiply(0.7));
+                    ui.painter().rect_filled(hl, 7.0, crate::shell::alpha(u.fg, 9));
                 }
-                let x0 = rect.left() + 10.0 + *depth as f32 * 14.0;
+                let x0 = rect.left() + 18.0 + *depth as f32 * 14.0;
                 let cy = rect.center().y;
                 // rename inline
                 if let Some((rp, text)) = &mut self.rename {
                     if rp == &entry.path {
-                        let inner = egui::Rect::from_min_max(egui::pos2(x0 + 20.0, rect.top() + 1.0), egui::pos2(rect.right() - 6.0, rect.bottom() - 1.0));
+                        let inner = egui::Rect::from_min_max(egui::pos2(x0 + 18.0, rect.top() + 1.0), egui::pos2(rect.right() - 10.0, rect.bottom() - 1.0));
                         let te = ui.put(inner, TextEdit::singleline(text).lock_focus(true));
                         if self.focus_edit {
                             te.request_focus();
@@ -262,26 +243,23 @@ impl Explorer {
                 }
                 let is_open = entry.is_dir && self.expanded.contains(&entry.path);
                 if entry.is_dir {
-                    icons::draw(ui.painter(), if is_open { Icon::ChevronDown } else { Icon::ChevronRight }, egui::pos2(x0 + 7.0, cy), 14.0, c(u.fg_dim));
-                    icons::draw_file(ui.painter(), icons::file_icon_key(&entry.path, true, is_open), egui::pos2(x0 + 24.0, cy), 16.0);
-                } else {
-                    icons::draw_file(ui.painter(), icons::file_icon_key(&entry.path, false, false), egui::pos2(x0 + 24.0, cy), 16.0);
+                    icons::draw(ui.painter(), if is_open { Icon::ChevronDown } else { Icon::ChevronRight }, egui::pos2(x0 + 5.0, cy), 12.0, c(u.fg_faint));
                 }
                 let status = git.get(&entry.path).copied();
                 let name_col = match status {
                     Some('U') | Some('A') | Some('?') => c(u.git_added),
                     Some('M') => c(u.git_modified),
                     Some('D') => c(u.git_deleted),
-                    _ => c(u.fg),
+                    _ => if entry.is_dir { c(u.fg) } else if is_active { c(u.fg) } else { c(u.fg).gamma_multiply(0.82) },
                 };
-                ui.painter().text(egui::pos2(x0 + 38.0, cy), Align2::LEFT_CENTER, &entry.name, FontId::proportional(13.0), name_col);
+                ui.painter().text(egui::pos2(x0 + 18.0, cy), Align2::LEFT_CENTER, &entry.name, FontId::proportional(13.0), name_col);
                 if let Some(s) = status {
                     let col = match s {
                         'M' => c(u.git_modified),
                         'D' => c(u.git_deleted),
                         _ => c(u.git_added),
                     };
-                    ui.painter().text(egui::pos2(rect.right() - 14.0, cy), Align2::CENTER_CENTER, if s == '?' { 'U' } else { s }.to_string(), FontId::proportional(11.0), col);
+                    ui.painter().text(egui::pos2(rect.right() - 20.0, cy), Align2::CENTER_CENTER, if s == '?' { 'U' } else { s }.to_string(), FontId::proportional(11.0), col);
                 }
                 if resp.clicked() {
                     select = Some(entry.path.clone());
