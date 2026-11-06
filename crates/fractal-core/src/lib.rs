@@ -1,6 +1,8 @@
 //! Fractal core: everything that is independent of the UI toolkit.
 
 pub mod buffer;
+pub mod complete;
+pub mod format;
 pub mod fsutil;
 pub mod git;
 pub mod jsonc;

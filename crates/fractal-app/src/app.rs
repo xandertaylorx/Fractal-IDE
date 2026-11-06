@@ -11,6 +11,7 @@ use crate::terminal::Term;
 use crate::ui_theme;
 use eframe::egui::{self, Event, Key};
 use fractal_core::buffer::{Buffer, EditKind, Motion};
+use fractal_core::complete::{self, Suggestion};
 use fractal_core::git;
 use fractal_core::keymap::{KeyCombo, Keymap, Resolve};
 use fractal_core::liveserver::LiveServer;
@@ -56,7 +57,19 @@ pub struct FindState {
     pub tab_id: usize,
 }
 
+pub struct Suggest {
+    pub items: Vec<Suggestion>,
+    pub selected: usize,
+    pub start: usize,
+    pub prefix: String,
+}
+
 pub struct App {
+    pub suggest: Option<Suggest>,
+    pub suggest_dirty: bool,
+    pub settings_reload: bool,
+    pub keybindings_reload: bool,
+    pub settings_filter: String,
     pub settings: Settings,
     pub session: Session,
     pub theme: Theme,
@@ -104,6 +117,8 @@ pub struct App {
     pub git_status_map: HashMap<PathBuf, char>,
     pub needs_session_save: bool,
     pub autorun: bool,
+    pub autorun_settings: bool,
+    pub autotype: Option<String>,
 }
 
 impl App {
@@ -134,6 +149,11 @@ impl App {
             keymap.load_user(&s);
         }
         let mut app = App {
+            suggest: None,
+            suggest_dirty: false,
+            settings_reload: false,
+            keybindings_reload: false,
+            settings_filter: String::new(),
             applied_zoom: settings.ui_scale,
             settings,
             session: session.clone(),
@@ -181,6 +201,8 @@ impl App {
             git_status_map: HashMap::new(),
             needs_session_save: false,
             autorun: std::env::var("FRACTAL_AUTORUN").is_ok(),
+            autorun_settings: std::env::var("FRACTAL_SETTINGS").is_ok(),
+            autotype: std::env::var("FRACTAL_TYPE").ok(),
         };
         // CLI args: fractal <folder|file>...
         let args: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).filter(|p| p.exists()).collect();
@@ -335,7 +357,23 @@ impl App {
     }
 
     pub fn save_tab(&mut self, idx: usize) -> bool {
+        if self.settings.format_on_save {
+            let project = self.folder.clone();
+            if let Some(t) = self.tabs.get_mut(idx) {
+                if !t.settings_page && t.buf.path.is_some() && !matches!(t.buf.lang.id, "plaintext" | "markdown") {
+                    let text = t.buf.text();
+                    if let Ok(f) = fractal_core::format::format_document(t.buf.lang.id, &text, t.buf.path.as_deref(), project.as_deref(), t.buf.indent) {
+                        if f.text != text {
+                            t.buf.replace_all_text(&f.text);
+                        }
+                    }
+                }
+            }
+        }
         let Some(tab) = self.tabs.get_mut(idx) else { return false };
+        if tab.settings_page {
+            return true;
+        }
         if tab.buf.path.is_none() {
             let Some(p) = rfd::FileDialog::new().set_title("Save As").set_directory(self.folder.clone().unwrap_or_else(|| dirs::home_dir().unwrap_or_default())).save_file() else { return false };
             tab.title_override = None;
@@ -353,6 +391,13 @@ impl App {
         self.scm.want_refresh = true;
         self.git_marks_for.remove(&idx);
         self.needs_session_save = true;
+        if let Some(p) = self.tabs.get(idx).and_then(|t| t.buf.path.clone()) {
+            if p == settings::settings_path() {
+                self.settings_reload = true;
+            } else if p == settings::keybindings_path() {
+                self.keybindings_reload = true;
+            }
+        }
         true
     }
 
@@ -790,8 +835,11 @@ impl App {
         if self.overlay.is_some() {
             f.insert("overlayVisible");
         }
-        if self.focus == Focus::Editor && !text_focus && self.overlay.is_none() && !self.tabs.is_empty() {
+        if self.focus == Focus::Editor && !text_focus && self.overlay.is_none() && self.tabs.get(self.active).map_or(false, |t| !t.settings_page) {
             f.insert("editorFocus");
+            if self.suggest.is_some() {
+                f.insert("suggestVisible");
+            }
         }
         if self.focus == Focus::Terminal && !text_focus && self.overlay.is_none() {
             f.insert("terminalFocus");
@@ -818,6 +866,57 @@ impl App {
         if events.is_empty() {
             return;
         }
+        self.handle_events(ctx, events);
+        if self.suggest_dirty {
+            self.suggest_dirty = false;
+            self.compute_suggest(1);
+        }
+    }
+
+    pub fn compute_suggest(&mut self, min_prefix: usize) {
+        self.suggest = None;
+        if !self.settings.suggestions || self.focus != Focus::Editor {
+            return;
+        }
+        let active = self.active;
+        // refresh word caches of the other tabs
+        for (i, t) in self.tabs.iter_mut().enumerate() {
+            if i == active || t.settings_page || t.buf.len_chars() > 600_000 {
+                continue;
+            }
+            if t.words_cache.as_ref().map_or(true, |(v, _)| *v != t.buf.version) {
+                let mut m = std::collections::HashMap::new();
+                complete::index_words(&t.buf.text(), &mut m);
+                t.words_cache = Some((t.buf.version, m));
+            }
+        }
+        let mut other: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for (i, t) in self.tabs.iter().enumerate() {
+            if i == active {
+                continue;
+            }
+            if let Some((_, m)) = &t.words_cache {
+                for (k, v) in m {
+                    *other.entry(k.clone()).or_insert(0) += v;
+                }
+            }
+        }
+        let Some(t) = self.tabs.get(active) else { return };
+        if t.settings_page || t.buf.sels.len() != 1 || !t.buf.primary().is_empty() {
+            return;
+        }
+        let (prefix, start) = t.buf.prefix_at_caret();
+        if prefix.chars().count() < min_prefix.max(1) || prefix.chars().next().map_or(true, |c| c.is_ascii_digit()) {
+            return;
+        }
+        let local = t.buf.nearby_words(400);
+        let items = complete::suggest(&complete::Inputs { prefix: &prefix, lang: t.buf.lang.id, local_words: &local, other_words: &other, max: 8 });
+        if !items.is_empty() {
+            self.suggest = Some(Suggest { items, selected: 0, start, prefix });
+        }
+    }
+
+    fn handle_events(&mut self, ctx: &egui::Context, events: Vec<Event>) {
         for ev in events {
             let flags = self.context_flags(ctx);
             let editor_focus = flags.contains("editorFocus");
@@ -858,12 +957,18 @@ impl App {
                     if editor_focus {
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             let chars: Vec<char> = t.chars().filter(|c| !c.is_control()).collect();
+                            let ident = chars.len() == 1 && (chars[0].is_alphanumeric() || chars[0] == '_');
                             if chars.len() == 1 {
                                 tab.buf.type_char(chars[0]);
                             } else if !chars.is_empty() {
                                 tab.buf.insert_text(&chars.iter().collect::<String>(), EditKind::Other);
                             }
                             tab.reveal = true;
+                            if ident {
+                                self.suggest_dirty = true;
+                            } else {
+                                self.suggest = None;
+                            }
                         }
                     } else if term_focus {
                         if let Some(tm) = self.terms.get_mut(self.active_term) {
@@ -949,7 +1054,38 @@ impl App {
 
     pub fn exec(&mut self, ctx: &egui::Context, id: &str) {
         self.last_activity = Instant::now();
+        if !matches!(id, "acceptSuggestion" | "selectNextSuggestion" | "selectPrevSuggestion" | "deleteLeft") {
+            self.suggest = None;
+        }
         match id {
+            "acceptSuggestion" => {
+                if let (Some(sg), Some(t)) = (self.suggest.take(), self.tabs.get_mut(self.active)) {
+                    if let Some(item) = sg.items.get(sg.selected) {
+                        t.buf.accept_completion(sg.start, &item.insert);
+                        t.reveal = true;
+                    }
+                }
+            }
+            "hideSuggestWidget" => self.suggest = None,
+            "selectNextSuggestion" => {
+                if let Some(sg) = &mut self.suggest {
+                    sg.selected = (sg.selected + 1) % sg.items.len();
+                }
+            }
+            "selectPrevSuggestion" => {
+                if let Some(sg) = &mut self.suggest {
+                    sg.selected = (sg.selected + sg.items.len() - 1) % sg.items.len();
+                }
+            }
+            "editor.action.triggerSuggest" => self.compute_suggest(1),
+            "editor.action.formatDocument" => self.format_active(),
+            "editor.action.blockComment" => self.edit(|b| b.toggle_block_comment()),
+            "workbench.action.openSettings" => self.open_settings_page(),
+            "workbench.action.openSettingsJson" => {
+                self.settings.save();
+                let p = settings::settings_path();
+                self.open_file(&p, None);
+            }
             // --- workbench ---
             "workbench.action.showCommands" => {
                 if self.overlay.is_some() {
@@ -1069,11 +1205,6 @@ impl App {
                     }
                 }
             }
-            "workbench.action.openSettings" => {
-                self.settings.save();
-                let p = settings::settings_path();
-                self.open_file(&p, None);
-            }
             "workbench.action.openGlobalKeybindings" => {
                 let p = settings::keybindings_path();
                 if !p.exists() {
@@ -1165,7 +1296,12 @@ impl App {
             "redo" => self.edit(|b| b.redo()),
             "editor.action.selectAll" => self.edit(|b| b.select_all()),
             "type.newline" => self.edit(|b| b.newline()),
-            "deleteLeft" => self.edit(|b| b.backspace()),
+            "deleteLeft" => {
+                self.edit(|b| b.backspace());
+                if self.suggest.is_some() {
+                    self.suggest_dirty = true;
+                }
+            }
             "deleteRight" => self.edit(|b| b.delete_forward()),
             "deleteWordLeft" => self.edit(|b| b.delete_word_left()),
             "deleteWordRight" => self.edit(|b| b.delete_word_right()),
@@ -1287,6 +1423,44 @@ impl App {
         });
     }
 
+    pub fn open_settings_page(&mut self) {
+        if let Some(i) = self.tabs.iter().position(|t| t.settings_page) {
+            self.active = i;
+        } else {
+            let mut tab = Tab::new(Buffer::new(), &self.theme);
+            tab.settings_page = true;
+            tab.title_override = Some("Settings".into());
+            let at = (self.active + 1).min(self.tabs.len());
+            self.tabs.insert(if self.tabs.is_empty() { 0 } else { at }, tab);
+            self.active = if self.tabs.len() == 1 { 0 } else { at };
+        }
+        self.focus = Focus::Other;
+    }
+
+    /// Format the active document with the language's formatter (or the built-in one).
+    pub fn format_active(&mut self) {
+        let project = self.folder.clone();
+        let Some(t) = self.tabs.get_mut(self.active) else { return };
+        if t.settings_page {
+            return;
+        }
+        let text = t.buf.text();
+        let path = t.buf.path.clone();
+        match fractal_core::format::format_document(t.buf.lang.id, &text, path.as_deref(), project.as_deref(), t.buf.indent) {
+            Ok(f) => {
+                if f.text == text {
+                    self.toast("Already formatted");
+                } else {
+                    t.buf.replace_all_text(&f.text);
+                    t.reveal = true;
+                    let msg = if f.used == "built-in" { "Formatted".to_string() } else { format!("Formatted with {}", f.used) };
+                    self.toast(msg);
+                }
+            }
+            Err(e) => self.toast(format!("Format failed: {e}")),
+        }
+    }
+
     pub fn show_side(&mut self, v: SideView) {
         self.sidebar_visible = true;
         self.side_view = v;
@@ -1298,6 +1472,30 @@ impl App {
     // ------------------------------------------------------------------
 
     pub fn tick(&mut self, ctx: &egui::Context) {
+        if self.settings_reload {
+            self.settings_reload = false;
+            let new = Settings::load();
+            let theme_changed = new.theme != self.settings.theme;
+            let font_changed = new.font_family != self.settings.font_family;
+            self.settings = new;
+            if theme_changed {
+                let n = self.settings.theme.clone();
+                self.set_theme(ctx, &n);
+            }
+            if font_changed {
+                ui_theme::setup_fonts(ctx, &self.settings.font_family);
+            }
+            self.toast("Settings reloaded");
+        }
+        if self.keybindings_reload {
+            self.keybindings_reload = false;
+            let mut km = Keymap::new(self.mac);
+            if let Ok(s) = std::fs::read_to_string(settings::keybindings_path()) {
+                km.load_user(&s);
+            }
+            self.keymap = km;
+            self.toast("Keybindings reloaded");
+        }
         self.tick_run_specs(ctx);
         // scm
         for a in self.scm.tick(ctx) {

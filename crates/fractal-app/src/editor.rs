@@ -22,6 +22,8 @@ pub struct Tab {
     pub viewport_lines: usize,
     pub untitled_n: usize,
     pub pending_goto: Option<(usize, usize, usize)>,
+    pub settings_page: bool,
+    pub words_cache: Option<(u64, std::collections::HashMap<String, u32>)>,
 }
 
 impl Tab {
@@ -42,6 +44,8 @@ impl Tab {
             viewport_lines: 40,
             untitled_n: 0,
             pending_goto: None,
+            settings_page: false,
+            words_cache: None,
         }
     }
 
@@ -120,11 +124,14 @@ pub struct EditorEnv<'a> {
     pub caret_visible: bool,
     pub find_matches: &'a [(usize, usize)],
     pub find_current: Option<usize>,
+    pub ghost: Option<String>,
 }
 
 #[derive(Default)]
 pub struct EditorResult {
     pub pressed: bool,
+    /// Screen position (x, top-y) of the primary caret when visible.
+    pub caret: Option<Pos2>,
 }
 
 const GUTTER_PAD: f32 = 12.0;
@@ -408,6 +415,25 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
             let galley = tp.layout_job(job);
             let gy = y + (m.line_h - galley.size().y) / 2.0;
             tp.galley(egui::pos2(x_of(start_vis), gy), galley, default_fg);
+        }
+    }
+
+    // ghost text (inline suggestion) + caret position for popups
+    {
+        let s = tab.buf.primary();
+        let (l, col) = tab.buf.char_to_pos(s.head);
+        if l >= first_line && l < last_line {
+            let text = tab.buf.line_string(l);
+            let vis = char_col_to_vis(&text, col, tab_w);
+            let cx = x_of(vis);
+            if cx >= text_left - 1.0 && cx <= text_right {
+                result.caret = Some(egui::pos2(cx, y_of(l)));
+                if let Some(g) = &env.ghost {
+                    if s.is_empty() && tab.buf.sels.len() == 1 && text.chars().skip(col).all(|c| c.is_whitespace()) {
+                        tp.text(egui::pos2(cx + 1.0, y_of(l) + m.line_h / 2.0), Align2::LEFT_CENTER, g, m.font.clone(), c(ui_c.fg_faint).gamma_multiply(0.9));
+                    }
+                }
+            }
         }
     }
 

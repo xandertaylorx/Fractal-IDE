@@ -145,6 +145,13 @@ impl Buffer {
 
     /// Type one character with auto-close / overtype / surround behaviour.
     pub fn type_char(&mut self, c: char) {
+        if c == '>' {
+            if let Some(close) = self.auto_close_tag() {
+                let p = self.primary().head;
+                self.apply(vec![Change { start: p, end: p, text: format!(">{close}"), sel: (1, 1) }], EditKind::Typing);
+                return;
+            }
+        }
         let mut sels = self.sels.clone();
         sels.sort_by_key(|s| s.start());
         let mut changes = vec![];
@@ -153,7 +160,8 @@ impl Buffer {
             let prev = if s.start() > 0 { self.char_at(s.start() - 1) } else { None };
             // Surround selection
             if !s.is_empty() {
-                if let Some(close) = closer_for(c) {
+                let md_pair = if self.lang.id == "markdown" && matches!(c, '*' | '_' | '~') { Some(c) } else { None };
+                if let Some(close) = closer_for(c).or(md_pair) {
                     let inner = self.slice_string(s.start(), s.end());
                     let n = inner.chars().count();
                     let text = format!("{c}{inner}{close}");
@@ -746,4 +754,140 @@ impl Buffer {
         }
         n
     }
+}
+
+// ----------------------------------------------------------------------
+// Smart editing helpers
+// ----------------------------------------------------------------------
+
+const VOID_TAGS: &[&str] = &["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"];
+
+impl Buffer {
+    /// The identifier being typed before the primary caret, and where it starts.
+    pub fn prefix_at_caret(&self) -> (String, usize) {
+        let head = self.primary().head;
+        let mut s = head;
+        while s > 0 && self.char_at(s - 1).map_or(false, is_word_char) {
+            s -= 1;
+        }
+        (self.slice_string(s, head), s)
+    }
+
+    /// Identifier counts in a window of lines around the caret.
+    pub fn nearby_words(&self, radius: usize) -> std::collections::HashMap<String, u32> {
+        let (line, _) = self.char_to_pos(self.primary().head);
+        let a = self.line_start(line.saturating_sub(radius));
+        let b_line = (line + radius).min(self.line_count().saturating_sub(1));
+        let b = self.line_end(b_line);
+        let mut m = std::collections::HashMap::new();
+        crate::complete::index_words(&self.slice_string(a, b), &mut m);
+        m
+    }
+
+    /// Replace the whole document (formatting), keeping the caret near where it was.
+    pub fn replace_all_text(&mut self, new: &str) {
+        let old = self.text();
+        if old == new {
+            return;
+        }
+        let head = self.primary().head;
+        let (line, col) = self.char_to_pos(head);
+        // keep the caret on the same line-from-end if the line count changed a lot
+        let n = self.len_chars();
+        let new_lines = new.split('\n').count();
+        let target_line = line.min(new_lines.saturating_sub(1));
+        let target_col = col;
+        self.apply(vec![Change { start: 0, end: n, text: new.to_string(), sel: (0, 0) }], EditKind::Other);
+        let pos = self.pos_to_char(target_line, target_col);
+        self.set_single_caret(pos);
+    }
+
+    /// If typing `>` closes an open tag, return the closing tag to insert after it.
+    pub fn auto_close_tag(&self) -> Option<String> {
+        if !matches!(self.lang.id, "html" | "xml" | "javascriptreact" | "typescriptreact") || self.sels.len() != 1 || !self.primary().is_empty() {
+            return None;
+        }
+        let head = self.primary().head;
+        let (line, col) = self.char_to_pos(head);
+        let before: String = self.line_string(line).chars().take(col).collect();
+        let lt = before.rfind('<')?;
+        let inner = &before[lt + 1..];
+        if inner.contains('>') || inner.starts_with('/') || inner.starts_with('!') || inner.starts_with('?') || inner.ends_with('/') {
+            return None;
+        }
+        let name: String = inner.chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == ':' || *c == '.').collect();
+        if name.is_empty() || VOID_TAGS.contains(&name.to_ascii_lowercase().as_str()) {
+            return None;
+        }
+        // already closed right after the caret?
+        let after = self.slice_string(head, (head + name.chars().count() + 3).min(self.len_chars()));
+        if after.starts_with(&format!("</{name}")) {
+            return None;
+        }
+        Some(format!("</{name}>"))
+    }
+
+    pub fn toggle_block_comment(&mut self) {
+        let Some((open, close)) = self.lang.block_comment else {
+            self.toggle_comment();
+            return;
+        };
+        let mut sels = self.sels.clone();
+        sels.sort_by_key(|s| s.start());
+        let mut changes = vec![];
+        for s in &sels {
+            let (a, b) = if s.is_empty() {
+                let (l, _) = self.char_to_pos(s.head);
+                let text = self.line_string(l);
+                let lead = text.chars().take_while(|c| c.is_whitespace()).count();
+                let trail = text.chars().rev().take_while(|c| c.is_whitespace()).count();
+                let ls = self.line_start(l);
+                (ls + lead, ls + text.chars().count().saturating_sub(trail))
+            } else {
+                (s.start(), s.end())
+            };
+            if a >= b {
+                continue;
+            }
+            let text = self.slice_string(a, b);
+            let new = if text.starts_with(open) && text.ends_with(close) && text.len() >= open.len() + close.len() {
+                let inner = &text[open.len()..text.len() - close.len()];
+                inner.strip_prefix(' ').unwrap_or(inner).strip_suffix(' ').unwrap_or(inner.strip_prefix(' ').unwrap_or(inner)).to_string()
+            } else {
+                format!("{open} {text} {close}")
+            };
+            let n = new.chars().count();
+            changes.push(Change { start: a, end: b, text: new, sel: (0, n) });
+        }
+        if !changes.is_empty() {
+            self.apply(changes, EditKind::Other);
+        }
+    }
+
+    /// Accept a completion: replace the typed prefix with `insert`; `$0` marks the final caret.
+    pub fn accept_completion(&mut self, prefix_start: usize, insert: &str) {
+        let head = self.primary().head;
+        // keep the indentation of the current line for multi-line snippets
+        let (line, _) = self.char_to_pos(head);
+        let indent: String = self.line_string(line).chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let unit = self.indent_unit();
+        let mut text = String::new();
+        for (i, l) in insert.split('\n').enumerate() {
+            if i > 0 {
+                text.push('\n');
+                text.push_str(&indent);
+            }
+            text.push_str(&if self.indent.use_spaces { l.to_string() } else { l.replace("    ", "\t") });
+        }
+        let _ = unit;
+        let cursor = text.find("$0");
+        let text = text.replacen("$0", "", 1);
+        let total = text.chars().count();
+        let c = cursor.map(|b| text_char_index(&text, b)).unwrap_or(total);
+        self.apply(vec![Change { start: prefix_start, end: head, text, sel: (c, c) }], EditKind::Other);
+    }
+}
+
+fn text_char_index(s: &str, byte: usize) -> usize {
+    s[..byte.min(s.len())].chars().count()
 }

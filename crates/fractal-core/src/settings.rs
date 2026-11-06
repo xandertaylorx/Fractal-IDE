@@ -17,6 +17,9 @@ pub struct Settings {
     pub cursor_blink: bool,
     pub terminal_font_size: f32,
     pub font_family: String,
+    pub format_on_save: bool,
+    pub suggestions: bool,
+    pub ghost_text: bool,
 }
 
 impl Default for Settings {
@@ -33,6 +36,9 @@ impl Default for Settings {
             cursor_blink: true,
             terminal_font_size: 13.0,
             font_family: String::new(),
+            format_on_save: false,
+            suggestions: true,
+            ghost_text: true,
         }
     }
 }

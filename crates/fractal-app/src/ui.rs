@@ -27,6 +27,24 @@ impl eframe::App for App {
             self.exec(&ctx, "fractal.run");
         }
 
+        if self.autorun_settings {
+            self.autorun_settings = false;
+            self.open_settings_page();
+        }
+        if let Some(txt) = self.autotype.take() {
+            if let Some(t) = self.tabs.get_mut(self.active) {
+                let end = t.buf.len_chars();
+                t.buf.set_single_caret(end);
+                for ch in txt.chars() {
+                    if ch == '\n' { t.buf.newline(); } else { t.buf.type_char(ch); }
+                }
+                t.reveal = true;
+            }
+            self.focus = Focus::Editor;
+            self.suggest_dirty = true;
+            self.compute_suggest(1);
+        }
+
         let title = match self.tab() {
             Some(t) => format!("{}{} — Fractal", t.title(), if t.buf.is_dirty() { " ●" } else { "" }),
             None => "Fractal".to_string(),
@@ -150,8 +168,11 @@ impl App {
             x -= 28.0;
             let r = Rect::from_min_size(egui::pos2(x, cy - 14.0), Vec2::splat(28.0));
             ui.scope_builder(UiBuilder::new().max_rect(r), |ui| {
-                if icon_button(ui, &t, Icon::Gear, "Settings (JSON)", false, 28.0).clicked() {
+                let resp = icon_button(ui, &t, Icon::Gear, "Settings  ·  right-click for settings.json", false, 28.0);
+                if resp.clicked() {
                     self.exec(ctx, "workbench.action.openSettings");
+                } else if resp.secondary_clicked() {
+                    self.exec(ctx, "workbench.action.openSettingsJson");
                 }
             });
             x -= 30.0;
@@ -262,7 +283,7 @@ impl App {
             }
             // right items
             let mut parts: Vec<(String, &str, &str)> = vec![];
-            if let Some(tab) = self.tab() {
+            if let Some(tab) = self.tab().filter(|t| !t.settings_page) {
                 let (l, cc) = tab.buf.char_to_pos(tab.buf.primary().head);
                 let line_txt = tab.buf.line_string(l);
                 let vis = editor::char_col_to_vis(&line_txt, cc, tab.buf.indent.size) + 1;
@@ -528,8 +549,12 @@ impl App {
                             ui.painter().rect_filled(r, 0.0, c(u.bg_hover).gamma_multiply(0.5));
                         }
                         ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, c(u.border)));
-                        let key = tab.buf.path.as_deref().map(|p| icons::file_icon_key(p, false, false)).unwrap_or("document");
-                        icons::draw_file(ui.painter(), key, egui::pos2(r.left() + 18.0, r.center().y), 15.0);
+                        if tab.settings_page {
+                            icons::draw(ui.painter(), Icon::Gear, egui::pos2(r.left() + 18.0, r.center().y), 15.0, c(u.fg_dim));
+                        } else {
+                            let key = tab.buf.path.as_deref().map(|p| icons::file_icon_key(p, false, false)).unwrap_or("document");
+                            icons::draw_file(ui.painter(), key, egui::pos2(r.left() + 18.0, r.center().y), 15.0);
+                        }
                         ui.painter().galley(egui::pos2(r.left() + 32.0, r.center().y - g.size().y / 2.0), g, if active { c(u.fg) } else { c(u.fg_dim) });
                         let xr = Rect::from_center_size(egui::pos2(r.right() - 14.0, r.center().y), Vec2::splat(18.0));
                         let xresp = ui.interact(xr, egui::Id::new(("tabclose", i)), Sense::click());
@@ -619,6 +644,10 @@ impl App {
                 self.draw_welcome(ui, ctx);
                 return;
             }
+            if self.tab().map_or(false, |t| t.settings_page) {
+                self.draw_settings_page(ui, ctx);
+                return;
+            }
             // breadcrumbs
             if let Some(tab) = self.tab() {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
@@ -649,10 +678,15 @@ impl App {
                 caret_visible: blink,
                 find_matches: if self.find.visible { &matches } else { &[] },
                 find_current: if self.find.visible { cur } else { None },
+                ghost: self.ghost_text(),
             };
             let active = self.active;
             let res = editor::show(ui, &mut self.tabs[active], &env);
+            if let (Some(caret), true) = (res.caret, self.suggest.is_some()) {
+                self.draw_suggest(ctx, caret, &m);
+            }
             if res.pressed {
+                self.suggest = None;
                 self.focus = Focus::Editor;
                 self.last_activity = Instant::now();
                 ctx.memory_mut(|m| {
@@ -665,6 +699,94 @@ impl App {
                 }
             }
         });
+    }
+
+    fn ghost_text(&self) -> Option<String> {
+        if !self.settings.ghost_text {
+            return None;
+        }
+        let sg = self.suggest.as_ref()?;
+        let item = sg.items.get(sg.selected)?;
+        match item.kind {
+            fractal_core::complete::Kind::Snippet => {
+                let first = item.insert.split('\n').next().unwrap_or("").replace("$0", "");
+                Some(format!("{first}  ⇥"))
+            }
+            _ => item.label.strip_prefix(sg.prefix.as_str()).map(|r| format!("{r}  ⇥")),
+        }
+    }
+
+    fn draw_suggest(&mut self, ctx: &egui::Context, caret: egui::Pos2, m: &editor::Metrics) {
+        let t = self.theme.clone();
+        let u = &t.ui;
+        let Some(sg) = &self.suggest else { return };
+        let items = sg.items.clone();
+        let prefix = sg.prefix.clone();
+        let selected = sg.selected;
+        let screen = ctx.content_rect();
+        let row_h = 24.0;
+        let width = 340.0;
+        let height = items.len() as f32 * row_h + 28.0;
+        let x = (caret.x - prefix.chars().count() as f32 * m.char_w - 30.0).clamp(screen.left() + 8.0, screen.right() - width - 8.0);
+        let mut y = caret.y + m.line_h + 2.0;
+        if y + height > screen.bottom() - 30.0 {
+            y = caret.y - height - 2.0;
+        }
+        let mut accept: Option<usize> = None;
+        egui::Area::new(egui::Id::new("suggest_popup")).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ctx, |ui| {
+            Frame::NONE
+                .fill(c(u.bg_side))
+                .stroke(Stroke::new(1.0, c(u.border)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if t.dark { 150 } else { 50 }) })
+                .inner_margin(Margin::same(4))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for (i, it) in items.iter().enumerate() {
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::click());
+                        if i == selected {
+                            ui.painter().rect_filled(rect, 5.0, c(u.selection));
+                        } else if resp.hovered() {
+                            ui.painter().rect_filled(rect, 5.0, c(u.bg_hover));
+                        }
+                        let (chip, tag) = match it.kind {
+                            fractal_core::complete::Kind::Snippet => (c(u.accent), "S"),
+                            fractal_core::complete::Kind::Keyword => (c(u.warning), "K"),
+                            fractal_core::complete::Kind::Word => (c(u.fg_dim), "w"),
+                        };
+                        let cr = Rect::from_center_size(egui::pos2(rect.left() + 14.0, rect.center().y), Vec2::splat(16.0));
+                        ui.painter().rect_filled(cr, 4.0, chip.gamma_multiply(0.28));
+                        ui.painter().text(cr.center(), Align2::CENTER_CENTER, tag, FontId::proportional(10.0), chip);
+                        let font = FontId::proportional(13.0);
+                        let pl = if it.label.to_lowercase().starts_with(&prefix.to_lowercase()) { prefix.chars().count() } else { 0 };
+                        let head: String = it.label.chars().take(pl).collect();
+                        let tail: String = it.label.chars().skip(pl).collect();
+                        let mut tx = rect.left() + 30.0;
+                        if !head.is_empty() {
+                            let g = ui.painter().layout_no_wrap(head, font.clone(), c(u.accent));
+                            let w = g.size().x;
+                            ui.painter().galley(egui::pos2(tx, rect.center().y - g.size().y / 2.0), g, c(u.accent));
+                            tx += w;
+                        }
+                        ui.painter().text(egui::pos2(tx, rect.center().y), Align2::LEFT_CENTER, tail, font, c(u.fg));
+                        if !it.detail.is_empty() {
+                            ui.painter().text(egui::pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, &it.detail, FontId::proportional(11.5), c(u.fg_dim));
+                        }
+                        if resp.clicked() {
+                            accept = Some(i);
+                        }
+                    }
+                    ui.add_space(2.0);
+                    ui.label(egui::RichText::new("Tab to accept  ·  ↑↓ to choose  ·  Esc to dismiss").size(10.5).color(c(u.fg_faint)));
+                });
+        });
+        if let Some(i) = accept {
+            if let Some(sg) = &mut self.suggest {
+                sg.selected = i;
+            }
+            self.exec(ctx, "acceptSuggestion");
+        }
     }
 
     fn draw_welcome(&mut self, ui: &mut Ui, ctx: &egui::Context) {

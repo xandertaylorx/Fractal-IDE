@@ -167,7 +167,7 @@ mod+j | workbench.action.togglePanel
 ctrl+` | workbench.action.terminal.toggleTerminal
 ctrl+shift+` | workbench.action.terminal.new
 mod+shift+e | workbench.view.explorer
-mod+shift+f | workbench.view.search
+mod+shift+h | workbench.view.search
 ctrl+shift+g | workbench.view.scm
 mod+, | workbench.action.openSettings
 mod+k mod+s | workbench.action.openGlobalKeybindings
@@ -288,6 +288,15 @@ ctrl+p | cursorUp | editorFocus | mac
 ctrl+n | cursorDown | editorFocus | mac
 ctrl+b | cursorLeft | editorFocus | mac
 ctrl+f | cursorRight | editorFocus | mac
+mod+shift+f | editor.action.formatDocument | editorFocus
+shift+alt+f | editor.action.formatDocument | editorFocus
+shift+alt+a | editor.action.blockComment | editorFocus
+ctrl+space | editor.action.triggerSuggest | editorFocus
+tab | acceptSuggestion | editorFocus && suggestVisible
+enter | acceptSuggestion | editorFocus && suggestVisible
+escape | hideSuggestWidget | editorFocus && suggestVisible
+up | selectPrevSuggestion | editorFocus && suggestVisible
+down | selectNextSuggestion | editorFocus && suggestVisible
 "#;
 
 pub fn eval_when(when: &str, ctx: &dyn Fn(&str) -> bool) -> bool {

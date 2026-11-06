@@ -186,3 +186,48 @@ fn vscode_default_themes_load_with_includes() {
     assert!(dm.syntax.scopes.len() > 20);
     assert!(ts.iter().any(|t| t.name == "Light Modern" && !t.dark));
 }
+
+#[test]
+fn html_auto_close_tag() {
+    let mut b = buf("<div class=\"a\"", "html");
+    b.set_single_caret(14);
+    b.type_char('>');
+    assert_eq!(b.text(), "<div class=\"a\"></div>");
+    assert_eq!(b.primary().head, 15);
+    let mut b = buf("<br", "html");
+    b.set_single_caret(3);
+    b.type_char('>');
+    assert_eq!(b.text(), "<br>");
+}
+
+#[test]
+fn quote_selected_word_and_markdown_emphasis() {
+    let mut b = buf("say hello now", "txt");
+    b.set_selection(4, 9);
+    b.type_char('"');
+    assert_eq!(b.text(), "say \"hello\" now");
+    b.type_char('(');
+    assert_eq!(b.text(), "say \"(hello)\" now");
+    let mut m = buf("make bold", "md");
+    m.set_selection(5, 9);
+    m.type_char('*');
+    m.type_char('*');
+    assert_eq!(m.text(), "make **bold**");
+}
+
+#[test]
+fn block_comment_and_completion_accept() {
+    let mut b = buf("<p>hi</p>", "html");
+    b.set_selection(0, 9);
+    b.toggle_block_comment();
+    assert_eq!(b.text(), "<!-- <p>hi</p> -->");
+    b.toggle_block_comment();
+    assert_eq!(b.text(), "<p>hi</p>");
+    let mut r = buf("    ma", "rs");
+    r.set_single_caret(6);
+    let (p, start) = r.prefix_at_caret();
+    assert_eq!(p, "ma");
+    r.accept_completion(start, "fn main() {\n    $0\n}");
+    assert_eq!(r.text(), "    fn main() {\n        \n    }");
+    assert_eq!(r.primary().head, 4 + 12 + 8);
+}
