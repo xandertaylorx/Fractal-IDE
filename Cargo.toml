@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/fractal-core", "crates/fractal-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/xandertaylorx/Fractal-IDE"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 2

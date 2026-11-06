@@ -1,0 +1,19 @@
+[package]
+name = "fractal-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+fuzzy-matcher = "0.3.7"
+ignore = "0.4.34"
+notify = "8.2.1"
+open = "5.4.5"
+regex = "1.13.1"
+ropey = "1.6.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+tiny_http = "0.12.0"
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
