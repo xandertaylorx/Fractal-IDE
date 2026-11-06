@@ -38,7 +38,7 @@ impl Default for Settings {
             font_family: String::new(),
             format_on_save: false,
             suggestions: true,
-            ghost_text: true,
+            ghost_text: false,
         }
     }
 }

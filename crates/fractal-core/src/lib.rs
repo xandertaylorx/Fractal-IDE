@@ -8,6 +8,7 @@ pub mod git;
 pub mod jsonc;
 pub mod keymap;
 pub mod lang;
+pub mod lsp;
 pub mod liveserver;
 pub mod run;
 pub mod search;

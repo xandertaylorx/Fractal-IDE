@@ -149,6 +149,7 @@ impl Explorer {
         let (hr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
         ui.painter().text(egui::pos2(hr.left() + 12.0, hr.center().y), Align2::LEFT_CENTER, name.to_uppercase(), FontId::proportional(11.0), c(u.fg_dim));
         let mut hx = hr.right() - 8.0;
+        let header_hot = ui.rect_contains_pointer(hr);
         for (icon, tip, dir) in [(Icon::Refresh, "Refresh", None), (Icon::FolderPlus, "New Folder", Some(true)), (Icon::FilePlus, "New File", Some(false))] {
             hx -= 22.0;
             let r = egui::Rect::from_center_size(egui::pos2(hx + 11.0, hr.center().y), Vec2::splat(22.0));
@@ -156,7 +157,9 @@ impl Explorer {
             if resp.hovered() {
                 ui.painter().rect_filled(r, 4.0, c(u.bg_hover));
             }
-            icons::draw(ui.painter(), icon, r.center(), 13.0, c(u.fg_dim));
+            if header_hot || resp.hovered() {
+                icons::draw(ui.painter(), icon, r.center(), 14.0, c(u.fg_dim));
+            }
             if resp.on_hover_text(tip).clicked() {
                 match dir {
                     None => self.cache.clear(),

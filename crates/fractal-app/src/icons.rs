@@ -43,6 +43,17 @@ pub enum Icon {
     Command,
     Commit,
     Ellipsis,
+    Error,
+    Warning,
+    Info,
+    KindMethod,
+    KindVariable,
+    KindClass,
+    KindKeyword,
+    KindModule,
+    KindConstant,
+    KindText,
+    KindSnippet,
 }
 
 impl Icon {
@@ -80,6 +91,17 @@ impl Icon {
             Icon::Command => "command",
             Icon::Commit => "git-commit-horizontal",
             Icon::Ellipsis => "ellipsis",
+            Icon::Error => "circle-x",
+            Icon::Warning => "triangle-alert",
+            Icon::Info => "info",
+            Icon::KindMethod => "box",
+            Icon::KindVariable => "variable",
+            Icon::KindClass => "braces",
+            Icon::KindKeyword => "key-round",
+            Icon::KindModule => "package",
+            Icon::KindConstant => "hash",
+            Icon::KindText => "text",
+            Icon::KindSnippet => "square-dashed",
         }
     }
 

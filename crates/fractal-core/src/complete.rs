@@ -8,6 +8,8 @@ pub enum Kind {
     Word,
     Keyword,
     Snippet,
+    /// Came from a language server; see `lsp_kind`.
+    Lsp,
 }
 
 #[derive(Clone, Debug)]
@@ -17,6 +19,11 @@ pub struct Suggestion {
     pub insert: String,
     pub kind: Kind,
     pub detail: String,
+    /// LSP CompletionItemKind (only for `Kind::Lsp`).
+    pub lsp_kind: u32,
+    pub deprecated: bool,
+    /// Absolute char index where the replacement starts (defaults to the typed prefix).
+    pub edit_start: Option<usize>,
 }
 
 fn kw(list: &str) -> Vec<&str> {
@@ -209,14 +216,14 @@ pub fn suggest(inp: &Inputs) -> Vec<Suggestion> {
         if s.0.starts_with(prefix) && s.0 != "" {
             let sc = if s.0 == prefix { 520 } else { 330 - s.0.len() as i64 };
             if seen.insert(format!("snip:{}", s.0)) {
-                scored.push((sc, Suggestion { label: s.0.to_string(), insert: expand_placeholders(s.1), kind: Kind::Snippet, detail: s.2.to_string() }));
+                scored.push((sc, Suggestion { label: s.0.to_string(), insert: expand_placeholders(s.1), kind: Kind::Snippet, detail: s.2.to_string(), lsp_kind: 0, deprecated: false, edit_start: None }));
             }
         }
     }
     for k in keywords(inp.lang) {
         if let Some(sc) = score(k, 120) {
             if seen.insert(k.to_string()) {
-                scored.push((sc, Suggestion { label: k.to_string(), insert: k.to_string(), kind: Kind::Keyword, detail: String::new() }));
+                scored.push((sc, Suggestion { label: k.to_string(), insert: k.to_string(), kind: Kind::Keyword, detail: String::new(), lsp_kind: 0, deprecated: false, edit_start: None }));
             }
         }
     }
@@ -224,7 +231,7 @@ pub fn suggest(inp: &Inputs) -> Vec<Suggestion> {
         for (w, n) in maps.iter() {
             if let Some(sc) = score(w, bonus + (*n as i64).min(20)) {
                 if seen.insert(w.clone()) {
-                    scored.push((sc, Suggestion { label: w.clone(), insert: w.clone(), kind: Kind::Word, detail: String::new() }));
+                    scored.push((sc, Suggestion { label: w.clone(), insert: w.clone(), kind: Kind::Word, detail: String::new(), lsp_kind: 0, deprecated: false, edit_start: None }));
                 }
             }
         }

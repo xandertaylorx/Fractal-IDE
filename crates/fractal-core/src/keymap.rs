@@ -292,6 +292,7 @@ mod+shift+f | editor.action.formatDocument | editorFocus
 shift+alt+f | editor.action.formatDocument | editorFocus
 shift+alt+a | editor.action.blockComment | editorFocus
 ctrl+space | editor.action.triggerSuggest | editorFocus
+f12 | editor.action.revealDefinition | editorFocus
 tab | acceptSuggestion | editorFocus && suggestVisible
 enter | acceptSuggestion | editorFocus && suggestVisible
 escape | hideSuggestWidget | editorFocus && suggestVisible

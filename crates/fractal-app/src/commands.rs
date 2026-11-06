@@ -32,6 +32,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("editor.action.formatDocument", "Format Document"),
     ("editor.action.blockComment", "Edit: Toggle Block Comment"),
     ("editor.action.triggerSuggest", "Edit: Trigger Suggest"),
+    ("editor.action.revealDefinition", "Go to Definition"),
     ("workbench.action.openGlobalKeybindings", "Preferences: Open Keyboard Shortcuts (JSON)"),
     ("fractal.toggleMinimap", "View: Toggle Minimap"),
     ("fractal.toggleAutoSave", "File: Toggle Auto Save"),

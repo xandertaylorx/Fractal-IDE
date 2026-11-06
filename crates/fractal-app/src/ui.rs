@@ -31,6 +31,11 @@ impl eframe::App for App {
             self.autorun_settings = false;
             self.open_settings_page();
         }
+        if let Some(cmd) = self.autocmd.take() {
+            for c in cmd.split(',') {
+                self.exec(&ctx, c.trim());
+            }
+        }
         if let Some(txt) = self.autotype.take() {
             if let Some(t) = self.tabs.get_mut(self.active) {
                 let end = t.buf.len_chars();
@@ -41,8 +46,8 @@ impl eframe::App for App {
                 t.reveal = true;
             }
             self.focus = Focus::Editor;
-            self.suggest_dirty = true;
-            self.compute_suggest(1);
+            let last = txt.chars().last();
+            self.after_typing(last);
         }
 
         let title = match self.tab() {
@@ -66,6 +71,7 @@ impl eframe::App for App {
         self.draw_tabbar(ui);
         self.draw_central(ui, &ctx);
         self.draw_find(&ctx);
+        self.draw_hover(&ctx);
         self.show_overlay(&ctx);
         self.draw_toasts(&ctx);
 
@@ -154,10 +160,9 @@ impl App {
             let w = (rect.width() * 0.34).clamp(180.0, 440.0);
             let cc = Rect::from_center_size(egui::pos2(rect.center().x, cy), Vec2::new(w, 28.0));
             let resp = ui.interact(cc, egui::Id::new("cmd_center"), Sense::click());
-            ui.painter().rect_filled(cc, 8.0, if resp.hovered() { c(u.bg_hover) } else { c(u.bg_input) });
-            ui.painter().rect_stroke(cc, 8.0, Stroke::new(1.0, c(u.border)), egui::StrokeKind::Inside);
-            icons::draw(ui.painter(), Icon::Search, egui::pos2(cc.left() + 16.0, cy), 13.0, c(u.fg_dim));
-            ui.painter().text(cc.center(), Align2::CENTER_CENTER, name, FontId::proportional(12.5), c(u.fg_dim));
+            ui.painter().rect_filled(cc, 6.0, if resp.hovered() { c(u.bg_hover) } else { c(u.bg_input).gamma_multiply(0.6) });
+            icons::draw(ui.painter(), Icon::Search, egui::pos2(cc.left() + 16.0, cy), 12.0, c(u.fg_faint));
+            ui.painter().text(cc.center(), Align2::CENTER_CENTER, name, FontId::proportional(12.0), c(u.fg_dim));
             if resp.on_hover_text("Search files, run commands (⌘P / ⇧⌘P)").clicked() {
                 self.open_overlay(Kind::QuickOpen, "");
             }
@@ -281,7 +286,18 @@ impl App {
             if self.settings.auto_save {
                 item(ui, &mut x, Some(Icon::Check), "Auto Save".into(), "Click to toggle", "autosave");
             }
+            if let Some(tab) = self.tab().filter(|t| !t.settings_page) {
+                let errs = tab.diags.iter().filter(|d| d.severity == 1).count();
+                let warns = tab.diags.iter().filter(|d| d.severity == 2).count();
+                if errs > 0 {
+                    item(ui, &mut x, Some(Icon::Error), errs.to_string(), "Errors in this file", "errs");
+                }
+                if warns > 0 {
+                    item(ui, &mut x, Some(Icon::Warning), warns.to_string(), "Warnings in this file", "warns");
+                }
+            }
             // right items
+            let lsp_part = self.lsp_status();
             let mut parts: Vec<(String, &str, &str)> = vec![];
             if let Some(tab) = self.tab().filter(|t| !t.settings_page) {
                 let (l, cc) = tab.buf.char_to_pos(tab.buf.primary().head);
@@ -300,6 +316,13 @@ impl App {
                 parts.push((ind, "Indentation", "indent"));
                 parts.push(("UTF-8".into(), "Encoding", "enc"));
                 parts.push((if tab.buf.crlf { "CRLF".into() } else { "LF".into() }, "Line ending", "eol"));
+                if let Some((n, ready)) = &lsp_part {
+                    if n.contains("not installed") {
+                        parts.push((format!("{n} — click to copy install command"), "Language server", "lspinstall"));
+                    } else {
+                        parts.push((if *ready { n.clone() } else { format!("{n} starting…") }, "Language server", "lsp"));
+                    }
+                }
                 parts.push((tab.hl.syntax_name().to_string(), "Language", "lang"));
             }
             let mut rx = rect.right() - 12.0;
@@ -315,6 +338,12 @@ impl App {
                 if resp.on_hover_text(tip).clicked() {
                     match id {
                         "pos" => self.exec(ctx, "workbench.action.gotoLine"),
+                        "lspinstall" => {
+                            if let Some(m) = self.lsp_missing_hint() {
+                                ctx.copy_text(m.install.to_string());
+                                self.toast(format!("Copied: {}", m.install));
+                            }
+                        }
                         "indent" => {
                             let n = self.tab().map(|t| (t.buf.indent.use_spaces, t.buf.indent.size));
                             if let Some((sp, sz)) = n {
@@ -682,6 +711,10 @@ impl App {
             };
             let active = self.active;
             let res = editor::show(ui, &mut self.tabs[active], &env);
+            self.lsp_hover_update(if self.suggest.is_none() { res.hover } else { None });
+            if let Some(idx) = res.cmd_click {
+                self.lsp_definition(idx);
+            }
             if let (Some(caret), true) = (res.caret, self.suggest.is_some()) {
                 self.draw_suggest(ctx, caret, &m);
             }
@@ -708,15 +741,13 @@ impl App {
         let sg = self.suggest.as_ref()?;
         let item = sg.items.get(sg.selected)?;
         match item.kind {
-            fractal_core::complete::Kind::Snippet => {
-                let first = item.insert.split('\n').next().unwrap_or("").replace("$0", "");
-                Some(format!("{first}  ⇥"))
-            }
-            _ => item.label.strip_prefix(sg.prefix.as_str()).map(|r| format!("{r}  ⇥")),
+            fractal_core::complete::Kind::Snippet => Some(item.insert.split('\n').next().unwrap_or("").replace("$0", "")),
+            _ => item.label.strip_prefix(sg.prefix.as_str()).map(|r| r.to_string()),
         }
     }
 
     fn draw_suggest(&mut self, ctx: &egui::Context, caret: egui::Pos2, m: &editor::Metrics) {
+        use fractal_core::complete::Kind as K;
         let t = self.theme.clone();
         let u = &t.ui;
         let Some(sg) = &self.suggest else { return };
@@ -724,61 +755,78 @@ impl App {
         let prefix = sg.prefix.clone();
         let selected = sg.selected;
         let screen = ctx.content_rect();
-        let row_h = 24.0;
-        let width = 340.0;
-        let height = items.len() as f32 * row_h + 28.0;
-        let x = (caret.x - prefix.chars().count() as f32 * m.char_w - 30.0).clamp(screen.left() + 8.0, screen.right() - width - 8.0);
+        let row_h = 22.0;
+        let max_rows = 9usize;
+        let rows = items.len().min(max_rows);
+        let first = if selected >= max_rows { selected + 1 - max_rows } else { 0 };
+        let width = 440.0f32.min(screen.width() - 24.0);
+        let height = rows as f32 * row_h + 8.0;
+        let x = (caret.x - prefix.chars().count() as f32 * m.char_w - 26.0).clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
         let mut y = caret.y + m.line_h + 2.0;
-        if y + height > screen.bottom() - 30.0 {
+        if y + height > screen.bottom() - 28.0 {
             y = caret.y - height - 2.0;
         }
+        let surface = fractal_core::theme::mix(u.bg, u.fg, if t.dark { 0.07 } else { 0.0 });
         let mut accept: Option<usize> = None;
+        let match_col = c(u.accent_text());
         egui::Area::new(egui::Id::new("suggest_popup")).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ctx, |ui| {
             Frame::NONE
-                .fill(c(u.bg_side))
+                .fill(c(surface))
                 .stroke(Stroke::new(1.0, c(u.border)))
-                .corner_radius(egui::CornerRadius::same(8))
-                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if t.dark { 150 } else { 50 }) })
+                .corner_radius(egui::CornerRadius::same(6))
+                .shadow(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(if t.dark { 130 } else { 40 }) })
                 .inner_margin(Margin::same(4))
                 .show(ui, |ui| {
-                    ui.set_width(width);
+                    ui.set_width(width - 8.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    for (i, it) in items.iter().enumerate() {
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::click());
-                        if i == selected {
-                            ui.painter().rect_filled(rect, 5.0, c(u.selection));
+                    for (i, it) in items.iter().enumerate().skip(first).take(rows) {
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width - 8.0, row_h), Sense::click());
+                        let sel = i == selected;
+                        if sel {
+                            ui.painter().rect_filled(rect, 4.0, c(u.selection));
                         } else if resp.hovered() {
-                            ui.painter().rect_filled(rect, 5.0, c(u.bg_hover));
+                            ui.painter().rect_filled(rect, 4.0, c(u.bg_hover));
                         }
-                        let (chip, tag) = match it.kind {
-                            fractal_core::complete::Kind::Snippet => (c(u.accent), "S"),
-                            fractal_core::complete::Kind::Keyword => (c(u.warning), "K"),
-                            fractal_core::complete::Kind::Word => (c(u.fg_dim), "w"),
+                        // kind icon
+                        let (icon, col) = match it.kind {
+                            K::Lsp => kind_icon(it.lsp_kind, &t),
+                            K::Keyword => (Icon::KindKeyword, c(u.fg_dim)),
+                            K::Snippet => (Icon::KindSnippet, c(u.fg_dim)),
+                            K::Word => (Icon::KindText, c(u.fg_dim)),
                         };
-                        let cr = Rect::from_center_size(egui::pos2(rect.left() + 14.0, rect.center().y), Vec2::splat(16.0));
-                        ui.painter().rect_filled(cr, 4.0, chip.gamma_multiply(0.28));
-                        ui.painter().text(cr.center(), Align2::CENTER_CENTER, tag, FontId::proportional(10.0), chip);
+                        icons::draw(ui.painter(), icon, egui::pos2(rect.left() + 14.0, rect.center().y), 14.0, col);
+                        // label with matched characters highlighted
                         let font = FontId::proportional(13.0);
-                        let pl = if it.label.to_lowercase().starts_with(&prefix.to_lowercase()) { prefix.chars().count() } else { 0 };
-                        let head: String = it.label.chars().take(pl).collect();
-                        let tail: String = it.label.chars().skip(pl).collect();
-                        let mut tx = rect.left() + 30.0;
-                        if !head.is_empty() {
-                            let g = ui.painter().layout_no_wrap(head, font.clone(), c(u.accent));
-                            let w = g.size().x;
-                            ui.painter().galley(egui::pos2(tx, rect.center().y - g.size().y / 2.0), g, c(u.accent));
-                            tx += w;
+                        let lp: Vec<char> = prefix.to_lowercase().chars().collect();
+                        let mut job = egui::text::LayoutJob::default();
+                        let mut li = 0usize;
+                        for ch in it.label.chars() {
+                            let hit = li < lp.len() && ch.to_lowercase().next() == Some(lp[li]);
+                            if hit {
+                                li += 1;
+                            }
+                            let mut fmt = egui::TextFormat { font_id: font.clone(), color: if hit { match_col } else { c(u.fg) }, ..Default::default() };
+                            if it.deprecated {
+                                fmt.strikethrough = Stroke::new(1.0, c(u.fg_dim));
+                            }
+                            job.append(&ch.to_string(), 0.0, fmt);
                         }
-                        ui.painter().text(egui::pos2(tx, rect.center().y), Align2::LEFT_CENTER, tail, font, c(u.fg));
+                        let g = ui.painter().layout_job(job);
+                        let lx = rect.left() + 30.0;
+                        let lw = g.size().x;
+                        ui.painter().with_clip_rect(rect).galley(egui::pos2(lx, rect.center().y - g.size().y / 2.0), g, c(u.fg));
                         if !it.detail.is_empty() {
-                            ui.painter().text(egui::pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, &it.detail, FontId::proportional(11.5), c(u.fg_dim));
+                            let dr = egui::Rect::from_min_max(egui::pos2(lx + lw + 14.0, rect.top()), egui::pos2(rect.right() - 8.0, rect.bottom()));
+                            if dr.width() > 24.0 {
+                                let dg = ui.painter().layout_no_wrap(it.detail.clone(), FontId::proportional(12.0), if sel { c(u.fg).gamma_multiply(0.75) } else { c(u.fg_dim) });
+                                let dx = (dr.right() - dg.size().x).max(dr.left());
+                                ui.painter().with_clip_rect(dr).galley(egui::pos2(dx, rect.center().y - dg.size().y / 2.0), dg, c(u.fg_dim));
+                            }
                         }
                         if resp.clicked() {
                             accept = Some(i);
                         }
                     }
-                    ui.add_space(2.0);
-                    ui.label(egui::RichText::new("Tab to accept  ·  ↑↓ to choose  ·  Esc to dismiss").size(10.5).color(c(u.fg_faint)));
                 });
         });
         if let Some(i) = accept {
@@ -977,5 +1025,23 @@ impl App {
             y -= resp.response.rect.height() + 8.0;
         }
         ctx.request_repaint_after(Duration::from_millis(100));
+    }
+}
+
+/// Icon + color for an LSP CompletionItemKind (same grouping as VS Code).
+fn kind_icon(kind: u32, t: &fractal_core::theme::Theme) -> (Icon, Color32) {
+    let purple = Color32::from_rgb(0xb1, 0x80, 0xd7);
+    let blue = Color32::from_rgb(0x75, 0xbe, 0xff);
+    let orange = Color32::from_rgb(0xee, 0x9d, 0x28);
+    let dim = c(t.ui.fg_dim);
+    match kind {
+        2 | 3 | 4 => (Icon::KindMethod, purple),
+        5 | 6 | 10 => (Icon::KindVariable, blue),
+        7 | 8 | 13 | 22 | 25 => (Icon::KindClass, orange),
+        9 | 17 | 19 => (Icon::KindModule, dim),
+        12 | 20 | 21 => (Icon::KindConstant, blue),
+        14 => (Icon::KindKeyword, dim),
+        15 => (Icon::KindSnippet, dim),
+        _ => (Icon::KindText, dim),
     }
 }

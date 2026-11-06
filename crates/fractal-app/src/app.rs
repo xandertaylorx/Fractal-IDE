@@ -65,6 +65,8 @@ pub struct Suggest {
 }
 
 pub struct App {
+    pub lsp: crate::lsp_app::LspHub,
+    pub last_typed: Option<char>,
     pub suggest: Option<Suggest>,
     pub suggest_dirty: bool,
     pub settings_reload: bool,
@@ -118,6 +120,7 @@ pub struct App {
     pub needs_session_save: bool,
     pub autorun: bool,
     pub autorun_settings: bool,
+    pub autocmd: Option<String>,
     pub autotype: Option<String>,
 }
 
@@ -149,6 +152,8 @@ impl App {
             keymap.load_user(&s);
         }
         let mut app = App {
+            lsp: Default::default(),
+            last_typed: None,
             suggest: None,
             suggest_dirty: false,
             settings_reload: false,
@@ -202,6 +207,7 @@ impl App {
             needs_session_save: false,
             autorun: std::env::var("FRACTAL_AUTORUN").is_ok(),
             autorun_settings: std::env::var("FRACTAL_SETTINGS").is_ok(),
+            autocmd: std::env::var("FRACTAL_CMD").ok(),
             autotype: std::env::var("FRACTAL_TYPE").ok(),
         };
         // CLI args: fractal <folder|file>...
@@ -392,6 +398,8 @@ impl App {
         self.git_marks_for.remove(&idx);
         self.needs_session_save = true;
         if let Some(p) = self.tabs.get(idx).and_then(|t| t.buf.path.clone()) {
+            self.lsp_sync_active(true);
+            self.lsp_did_save(&p);
             if p == settings::settings_path() {
                 self.settings_reload = true;
             } else if p == settings::keybindings_path() {
@@ -456,6 +464,7 @@ impl App {
             }
         }
         if let Some(p) = self.tabs[idx].buf.path.clone() {
+            self.lsp_did_close(&p);
             self.closed_stack.push(p);
         }
         self.tabs.remove(idx);
@@ -869,7 +878,8 @@ impl App {
         self.handle_events(ctx, events);
         if self.suggest_dirty {
             self.suggest_dirty = false;
-            self.compute_suggest(1);
+            let c = self.last_typed.take();
+            self.after_typing(c);
         }
     }
 
@@ -957,17 +967,19 @@ impl App {
                     if editor_focus {
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             let chars: Vec<char> = t.chars().filter(|c| !c.is_control()).collect();
-                            let ident = chars.len() == 1 && (chars[0].is_alphanumeric() || chars[0] == '_');
+                            let single = if chars.len() == 1 { Some(chars[0]) } else { None };
                             if chars.len() == 1 {
                                 tab.buf.type_char(chars[0]);
                             } else if !chars.is_empty() {
                                 tab.buf.insert_text(&chars.iter().collect::<String>(), EditKind::Other);
                             }
                             tab.reveal = true;
-                            if ident {
-                                self.suggest_dirty = true;
-                            } else {
-                                self.suggest = None;
+                            match single {
+                                Some(c) => {
+                                    self.suggest_dirty = true;
+                                    self.last_typed = Some(c);
+                                }
+                                None => self.suggest = None,
                             }
                         }
                     } else if term_focus {
@@ -1061,7 +1073,7 @@ impl App {
             "acceptSuggestion" => {
                 if let (Some(sg), Some(t)) = (self.suggest.take(), self.tabs.get_mut(self.active)) {
                     if let Some(item) = sg.items.get(sg.selected) {
-                        t.buf.accept_completion(sg.start, &item.insert);
+                        t.buf.accept_completion(item.edit_start.unwrap_or(sg.start), &item.insert);
                         t.reveal = true;
                     }
                 }
@@ -1077,7 +1089,19 @@ impl App {
                     sg.selected = (sg.selected + sg.items.len() - 1) % sg.items.len();
                 }
             }
-            "editor.action.triggerSuggest" => self.compute_suggest(1),
+            "editor.action.triggerSuggest" => {
+                if self.lsp_status().map_or(false, |s| s.1) {
+                    self.lsp_request_completion(None);
+                } else {
+                    self.compute_suggest(1);
+                }
+            }
+            "editor.action.revealDefinition" => {
+                if let Some(t) = self.tab() {
+                    let h = t.buf.primary().head;
+                    self.lsp_definition(h);
+                }
+            }
             "editor.action.formatDocument" => self.format_active(),
             "editor.action.blockComment" => self.edit(|b| b.toggle_block_comment()),
             "workbench.action.openSettings" => self.open_settings_page(),
@@ -1300,6 +1324,7 @@ impl App {
                 self.edit(|b| b.backspace());
                 if self.suggest.is_some() {
                     self.suggest_dirty = true;
+                    self.last_typed = None;
                 }
             }
             "deleteRight" => self.edit(|b| b.delete_forward()),
@@ -1472,6 +1497,7 @@ impl App {
     // ------------------------------------------------------------------
 
     pub fn tick(&mut self, ctx: &egui::Context) {
+        self.lsp_tick(ctx);
         if self.settings_reload {
             self.settings_reload = false;
             let new = Settings::load();

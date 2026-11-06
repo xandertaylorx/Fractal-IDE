@@ -23,6 +23,10 @@ pub struct Tab {
     pub untitled_n: usize,
     pub pending_goto: Option<(usize, usize, usize)>,
     pub settings_page: bool,
+    pub lsp_synced: u64,
+    pub diags: Vec<fractal_core::lsp::Diagnostic>,
+    pub hover_since: Instant,
+    pub hover_pos: Option<Pos2>,
     pub words_cache: Option<(u64, std::collections::HashMap<String, u32>)>,
 }
 
@@ -45,6 +49,10 @@ impl Tab {
             untitled_n: 0,
             pending_goto: None,
             settings_page: false,
+            lsp_synced: u64::MAX,
+            diags: vec![],
+            hover_since: Instant::now(),
+            hover_pos: None,
             words_cache: None,
         }
     }
@@ -132,6 +140,10 @@ pub struct EditorResult {
     pub pressed: bool,
     /// Screen position (x, top-y) of the primary caret when visible.
     pub caret: Option<Pos2>,
+    /// Pointer rested over this char index for a while (for hover info).
+    pub hover: Option<(usize, Pos2)>,
+    /// ⌘-click on this char index (go to definition).
+    pub cmd_click: Option<usize>,
 }
 
 const GUTTER_PAD: f32 = 12.0;
@@ -226,6 +238,9 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
         if pressed && text_rect.contains(p) && resp.hovered() {
             result.pressed = true;
             let idx = pos_to_char(&tab.buf, p, tab.scroll_y, tab.scroll_x);
+            if mods.command && !mods.alt && !mods.shift && !dbl && !tpl {
+                result.cmd_click = Some(idx);
+            }
             if tpl {
                 tab.buf.select_line_at(idx);
                 tab.drag_anchor = None;
@@ -270,6 +285,29 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
     }
     if !down {
         tab.drag_anchor = None;
+    }
+    // hover dwell
+    if let Some(p) = pointer {
+        if text_rect.contains(p) && p.x >= text_left && resp.hovered() && !down {
+            let moved = tab.hover_pos.map_or(true, |q| (q - p).length() > 2.0);
+            if moved {
+                tab.hover_pos = Some(p);
+                tab.hover_since = Instant::now();
+            } else if tab.hover_since.elapsed() >= Duration::from_millis(450) {
+                let ly = ((p.y - rect.top() + tab.scroll_y) / m.line_h).floor().max(0.0) as usize;
+                let line = ly.min(tab.buf.line_count().saturating_sub(1));
+                let vis = ((p.x - text_left + tab.scroll_x) / m.char_w).floor().max(0.0) as usize;
+                let text = tab.buf.line_string(line);
+                let col = vis_to_char_col(&text, vis, tab_w);
+                if col < text.chars().count() {
+                    result.hover = Some((tab.buf.pos_to_char(line, col), p));
+                }
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(120));
+            }
+        } else {
+            tab.hover_pos = None;
+        }
     }
 
     // --- painting ------------------------------------------------------
@@ -415,6 +453,40 @@ pub fn show(ui: &mut Ui, tab: &mut Tab, env: &EditorEnv) -> EditorResult {
             let galley = tp.layout_job(job);
             let gy = y + (m.line_h - galley.size().y) / 2.0;
             tp.galley(egui::pos2(x_of(start_vis), gy), galley, default_fg);
+        }
+    }
+
+    // diagnostics squiggles
+    for d in &tab.diags {
+        if d.end_line < first_line || d.line >= last_line {
+            continue;
+        }
+        let color = match d.severity {
+            1 => c(ui_c.error),
+            2 => c(ui_c.warning),
+            _ => c(ui_c.accent).gamma_multiply(0.8),
+        };
+        for l in d.line.max(first_line)..=d.end_line.min(last_line.saturating_sub(1)) {
+            let text = tab.buf.line_string(l);
+            let len = text.chars().count();
+            let sc = if l == d.line { d.col.min(len) } else { 0 };
+            let mut ec = if l == d.end_line { d.end_col.min(len) } else { len };
+            if ec <= sc {
+                ec = (sc + 1).min(len.max(sc + 1));
+            }
+            let x0 = x_of(char_col_to_vis(&text, sc, tab_w));
+            let x1 = x_of(char_col_to_vis(&text, ec, tab_w)).max(x0 + 4.0);
+            let y = y_of(l) + m.line_h - 3.0;
+            let mut pts = vec![];
+            let mut x = x0;
+            let mut up = false;
+            while x < x1 {
+                pts.push(egui::pos2(x, if up { y - 1.6 } else { y }));
+                up = !up;
+                x += 2.2;
+            }
+            pts.push(egui::pos2(x1, if up { y - 1.6 } else { y }));
+            tp.add(egui::Shape::line(pts, egui::Stroke::new(1.1, color)));
         }
     }
 

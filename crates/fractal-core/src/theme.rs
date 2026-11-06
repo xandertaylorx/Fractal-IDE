@@ -35,6 +35,14 @@ pub struct UiColors {
     pub git_deleted: Rgba,
 }
 
+impl UiColors {
+    /// A readable accent for text on the editor background (VS Code uses a lighter blue for matches).
+    pub fn accent_text(&self) -> Rgba {
+        let lum = (0.299 * self.bg[0] as f32 + 0.587 * self.bg[1] as f32 + 0.114 * self.bg[2] as f32) / 255.0;
+        if lum < 0.5 { mix(self.accent, [255, 255, 255, 255], 0.35) } else { mix(self.accent, [0, 0, 0, 255], 0.15) }
+    }
+}
+
 #[derive(Clone)]
 pub struct Theme {
     pub name: String,

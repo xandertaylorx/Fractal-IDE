@@ -8,6 +8,7 @@ mod editor;
 mod explorer;
 mod icons;
 mod job;
+mod lsp_app;
 mod overlay;
 mod scm;
 mod search_panel;
