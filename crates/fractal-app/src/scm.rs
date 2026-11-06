@@ -144,7 +144,7 @@ impl Scm {
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
             // branch + sync row
             ui.horizontal(|ui| {
-                if ghost_button(ui, theme, &format!("⑂ {}", st.branch)).clicked() {
+                if ghost_button(ui, theme, &st.branch.clone()).clicked() {
                     actions.push(ScmAction::BranchPicker);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -165,7 +165,7 @@ impl Scm {
             ui.add_space(4.0);
             let can_commit = !self.message.trim().is_empty() && (staged_n > 0 || !st.entries.is_empty());
             let enter_commit = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter)) && can_commit && ui.memory(|m| m.focused().is_some());
-            if (accent_button(ui, theme, if staged_n > 0 { "✓ Commit" } else { "✓ Commit All" }, can_commit && !self.busy()).clicked() || enter_commit) && can_commit {
+            if (accent_button(ui, theme, if staged_n > 0 { "Commit" } else { "Commit All" }, can_commit && !self.busy()).clicked() || enter_commit) && can_commit {
                 let msg = self.message.clone();
                 let stage_all = staged_n == 0;
                 self.run_op(ui.ctx(), "Commit", move |r| {
@@ -211,7 +211,8 @@ impl Scm {
                     };
                     let name = Path::new(&e.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                     let dir = Path::new(&e.path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                    let g = ui.painter().text(egui::pos2(rect.left() + 14.0, rect.center().y), Align2::LEFT_CENTER, &name, FontId::proportional(13.0), c(u.fg));
+                    crate::icons::draw_file(ui.painter(), crate::icons::file_icon_key(Path::new(&e.path), false, false), egui::pos2(rect.left() + 22.0, rect.center().y), 15.0);
+                    let g = ui.painter().text(egui::pos2(rect.left() + 36.0, rect.center().y), Align2::LEFT_CENTER, &name, FontId::proportional(13.0), c(u.fg));
                     ui.painter().text(egui::pos2(g.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, dir, FontId::proportional(11.5), c(u.fg_faint));
                     ui.painter().text(egui::pos2(rect.right() - 12.0, rect.center().y), Align2::CENTER_CENTER, if letter == '?' { 'U' } else { letter }.to_string(), FontId::proportional(11.5), col);
                     if resp.hovered() {

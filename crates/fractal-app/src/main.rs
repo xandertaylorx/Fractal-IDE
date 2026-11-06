@@ -2,6 +2,7 @@
 #![allow(deprecated)]
 
 mod app;
+mod assets;
 mod commands;
 mod editor;
 mod explorer;

@@ -25,7 +25,7 @@ pub fn small_toggle(ui: &mut Ui, theme: &Theme, icon: Icon, tip: &str, on: &mut 
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 4.0, c(theme.ui.bg_hover));
     }
-    icons::draw(ui.painter(), icon, rect.center(), 13.0, if *on { c(theme.ui.fg) } else { c(theme.ui.fg_dim) });
+    icons::draw(ui.painter(), icon, rect.center(), 16.0, if *on { c(theme.ui.fg) } else { c(theme.ui.fg_dim) });
     resp.on_hover_text(tip)
 }
 

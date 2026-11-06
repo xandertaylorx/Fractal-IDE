@@ -111,7 +111,8 @@ impl App {
         let mac = cfg!(target_os = "macos");
         let settings = Settings::load();
         let session = Session::load();
-        let mut themes: Vec<Theme> = theme::builtin_names().iter().filter_map(|n| theme::builtin(n)).collect();
+        let mut themes: Vec<Theme> = theme::vscode_defaults();
+        themes.extend(theme::builtin_names().iter().filter_map(|n| theme::builtin(n)));
         if let Ok(rd) = std::fs::read_dir(settings::themes_dir()) {
             for e in rd.flatten() {
                 if e.path().extension().map_or(false, |x| x == "json") {
@@ -123,7 +124,7 @@ impl App {
                 }
             }
         }
-        let theme = themes.iter().find(|t| t.name == settings.theme).cloned().unwrap_or_else(|| theme::builtin(theme::DEFAULT_THEME).unwrap());
+        let theme = themes.iter().find(|t| t.name == settings.theme).cloned().unwrap_or_else(|| themes[0].clone());
         ui_theme::setup_fonts(&cc.egui_ctx, &settings.font_family);
         ui_theme::apply(&cc.egui_ctx, &theme);
         cc.egui_ctx.set_zoom_factor(settings.ui_scale);

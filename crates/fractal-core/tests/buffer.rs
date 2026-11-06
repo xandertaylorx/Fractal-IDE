@@ -173,3 +173,16 @@ fn builtin_themes_all_build() {
         assert!(fractal_core::theme::builtin(n).is_some(), "{n}");
     }
 }
+
+#[test]
+fn vscode_default_themes_load_with_includes() {
+    let ts = fractal_core::theme::vscode_defaults();
+    assert_eq!(ts.len(), 4);
+    let dm = ts.iter().find(|t| t.name == "Dark Modern").expect("Dark Modern");
+    assert_eq!(dm.ui.bg, [0x1f, 0x1f, 0x1f, 255]);
+    assert_eq!(dm.ui.bg_side, [0x18, 0x18, 0x18, 255]);
+    assert_eq!(dm.ui.accent, [0x00, 0x78, 0xd4, 255]);
+    // token colors inherited from dark_plus via include must exist
+    assert!(dm.syntax.scopes.len() > 20);
+    assert!(ts.iter().any(|t| t.name == "Light Modern" && !t.dark));
+}

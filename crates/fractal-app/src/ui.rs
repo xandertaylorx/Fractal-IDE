@@ -226,35 +226,39 @@ impl App {
             let col = c(u.fg_status);
             // left items
             let mut x = rect.left() + 12.0;
-            let mut item = |ui: &mut Ui, x: &mut f32, text: String, tip: &str, id: &str| -> bool {
+            let mut item = |ui: &mut Ui, x: &mut f32, icon: Option<Icon>, text: String, tip: &str, id: &str| -> bool {
                 let g = ui.painter().layout_no_wrap(text, font.clone(), col);
-                let r = Rect::from_min_size(egui::pos2(*x - 4.0, rect.top() + 2.0), Vec2::new(g.size().x + 8.0, 20.0));
+                let iw = if icon.is_some() { 16.0 } else { 0.0 };
+                let r = Rect::from_min_size(egui::pos2(*x - 4.0, rect.top() + 2.0), Vec2::new(g.size().x + iw + 8.0, 20.0));
                 let resp = ui.interact(r, egui::Id::new(("status", id)), Sense::click());
                 if resp.hovered() {
                     ui.painter().rect_filled(r, 4.0, c(u.bg_hover));
                 }
-                ui.painter().galley(egui::pos2(*x, cy - g.size().y / 2.0), g.clone(), col);
-                *x += g.size().x + 14.0;
+                if let Some(ic) = icon {
+                    icons::draw(ui.painter(), ic, egui::pos2(*x + 6.0, cy), 13.0, col);
+                }
+                ui.painter().galley(egui::pos2(*x + iw, cy - g.size().y / 2.0), g.clone(), col);
+                *x += g.size().x + iw + 14.0;
                 resp.on_hover_text(tip).clicked()
             };
             if let Some(st) = self.scm.status.clone() {
-                let mut s = format!("⑂ {}", st.branch);
+                let mut s = st.branch.clone();
                 if st.ahead > 0 || st.behind > 0 {
                     s.push_str(&format!("  ↓{} ↑{}", st.behind, st.ahead));
                 }
-                if item(ui, &mut x, s, "Switch branch", "branch") {
+                if item(ui, &mut x, Some(Icon::Branch), s, "Switch branch", "branch") {
                     self.open_overlay(Kind::Branch, "");
                 }
                 let n = st.entries.len();
-                if n > 0 && item(ui, &mut x, format!("● {n}"), "Uncommitted changes", "changes") {
+                if n > 0 && item(ui, &mut x, Some(Icon::Commit), format!("{n} changed"), "Uncommitted changes", "changes") {
                     self.show_side(SideView::Scm);
                 }
             }
             if self.scm.busy() {
-                item(ui, &mut x, "⟳ working…".into(), "Git operation in progress", "busy");
+                item(ui, &mut x, Some(Icon::Refresh), "Working…".into(), "Git operation in progress", "busy");
             }
             if self.settings.auto_save {
-                item(ui, &mut x, "Auto Save".into(), "Click to toggle", "autosave");
+                item(ui, &mut x, Some(Icon::Check), "Auto Save".into(), "Click to toggle", "autosave");
             }
             // right items
             let mut parts: Vec<(String, &str, &str)> = vec![];
@@ -414,7 +418,7 @@ impl App {
             for (i, term) in self.terms.iter().enumerate() {
                 let label = term.title.clone();
                 let g = ui.painter().layout_no_wrap(label, FontId::proportional(12.0), c(u.fg));
-                let w = g.size().x + 36.0;
+                let w = g.size().x + 52.0;
                 let r = Rect::from_min_size(egui::pos2(x, hr.top() + 3.0), Vec2::new(w, 24.0));
                 let resp = ui.interact(r, egui::Id::new(("termtab", i)), Sense::click());
                 let active = i == self.active_term;
@@ -425,7 +429,7 @@ impl App {
                 }
                 let dead = !term.alive.load(std::sync::atomic::Ordering::Relaxed);
                 icons::draw(ui.painter(), Icon::Terminal, egui::pos2(r.left() + 13.0, r.center().y), 12.0, if dead { c(u.fg_faint) } else { c(u.fg_dim) });
-                ui.painter().galley(egui::pos2(r.left() + 25.0, r.center().y - g.size().y / 2.0), g, if active { c(u.fg) } else { c(u.fg_dim) });
+                ui.painter().galley(egui::pos2(r.left() + 32.0, r.center().y - g.size().y / 2.0), g, if active { c(u.fg) } else { c(u.fg_dim) });
                 let xr = Rect::from_center_size(egui::pos2(r.right() - 10.0, r.center().y), Vec2::splat(16.0));
                 let xresp = ui.interact(xr, egui::Id::new(("termclose", i)), Sense::click());
                 if resp.hovered() || active {
@@ -514,7 +518,7 @@ impl App {
                     for (i, tab) in self.tabs.iter().enumerate() {
                         let name = tab.title();
                         let g = ui.painter().layout_no_wrap(name.clone(), FontId::proportional(12.5), c(u.fg));
-                        let w = g.size().x + 54.0;
+                        let w = g.size().x + 62.0;
                         let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 36.0), Sense::click());
                         let active = i == self.active;
                         if active {
@@ -524,9 +528,9 @@ impl App {
                             ui.painter().rect_filled(r, 0.0, c(u.bg_hover).gamma_multiply(0.5));
                         }
                         ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, c(u.border)));
-                        let ext = tab.buf.path.as_ref().and_then(|p| p.extension()).map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-                        ui.painter().circle_filled(egui::pos2(r.left() + 14.0, r.center().y), 3.5, icons::file_color(&ext));
-                        ui.painter().galley(egui::pos2(r.left() + 25.0, r.center().y - g.size().y / 2.0), g, if active { c(u.fg) } else { c(u.fg_dim) });
+                        let key = tab.buf.path.as_deref().map(|p| icons::file_icon_key(p, false, false)).unwrap_or("document");
+                        icons::draw_file(ui.painter(), key, egui::pos2(r.left() + 18.0, r.center().y), 15.0);
+                        ui.painter().galley(egui::pos2(r.left() + 32.0, r.center().y - g.size().y / 2.0), g, if active { c(u.fg) } else { c(u.fg_dim) });
                         let xr = Rect::from_center_size(egui::pos2(r.right() - 14.0, r.center().y), Vec2::splat(18.0));
                         let xresp = ui.interact(xr, egui::Id::new(("tabclose", i)), Sense::click());
                         let dirty = tab.buf.is_dirty();

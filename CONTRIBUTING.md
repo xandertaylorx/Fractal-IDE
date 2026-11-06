@@ -9,3 +9,5 @@ cargo run -p fractal-app -- path/to/project
 ```
 
 Good first issues: LSP client, debugger (DAP), word wrap, split editors, Windows title-bar controls, more run-detection rules in `fractal-core/src/run.rs`.
+
+Adding icons: drop an SVG into `crates/fractal-app/assets/ui` or `assets/files`, then run `scripts/gen-assets.py` to regenerate `src/assets.rs`.

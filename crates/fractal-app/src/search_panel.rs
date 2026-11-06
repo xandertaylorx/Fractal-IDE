@@ -188,7 +188,8 @@ impl SearchPanel {
                         let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().to_string();
                         let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                         let dir = rel.strip_suffix(&name).unwrap_or("").trim_end_matches('/').to_string();
-                        let g = ui.painter().text(egui::pos2(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, &name, FontId::proportional(13.0), c(u.fg));
+                        icons::draw_file(ui.painter(), icons::file_icon_key(p, false, false), egui::pos2(rect.left() + 32.0, rect.center().y), 15.0);
+                        let g = ui.painter().text(egui::pos2(rect.left() + 46.0, rect.center().y), Align2::LEFT_CENTER, &name, FontId::proportional(13.0), c(u.fg));
                         ui.painter().text(egui::pos2(g.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, dir, FontId::proportional(11.5), c(u.fg_faint));
                         ui.painter().text(egui::pos2(rect.right() - 12.0, rect.center().y), Align2::RIGHT_CENTER, v.len().to_string(), FontId::proportional(11.0), c(u.fg_dim));
                         if resp.clicked() {
@@ -201,7 +202,7 @@ impl SearchPanel {
                         let trim = h.preview.chars().count() - preview.chars().count();
                         let s = h.col_start.saturating_sub(trim);
                         let chars: Vec<char> = preview.chars().collect();
-                        let pre: String = chars.iter().take(s).skip(s.saturating_sub(18)).collect();
+                        let pre: String = chars.iter().take(s).skip(s.saturating_sub(40)).collect();
                         let mid: String = chars.iter().skip(s).take(h.col_end - h.col_start).collect();
                         let post: String = chars.iter().skip(s + (h.col_end - h.col_start)).take(80).collect();
                         let font = FontId::monospace(12.0);

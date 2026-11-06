@@ -149,7 +149,7 @@ impl Explorer {
         let (hr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
         ui.painter().text(egui::pos2(hr.left() + 12.0, hr.center().y), Align2::LEFT_CENTER, name.to_uppercase(), FontId::proportional(11.0), c(u.fg_dim));
         let mut hx = hr.right() - 8.0;
-        for (icon, tip, dir) in [(Icon::Refresh, "Refresh", None), (Icon::Folder, "New Folder", Some(true)), (Icon::File, "New File", Some(false))] {
+        for (icon, tip, dir) in [(Icon::Refresh, "Refresh", None), (Icon::FolderPlus, "New Folder", Some(true)), (Icon::FilePlus, "New File", Some(false))] {
             hx -= 22.0;
             let r = egui::Rect::from_center_size(egui::pos2(hx + 11.0, hr.center().y), Vec2::splat(22.0));
             let resp = ui.interact(r, ui.id().with(tip), Sense::click());
@@ -259,11 +259,10 @@ impl Explorer {
                 }
                 let is_open = entry.is_dir && self.expanded.contains(&entry.path);
                 if entry.is_dir {
-                    icons::draw(ui.painter(), if is_open { Icon::ChevronDown } else { Icon::ChevronRight }, egui::pos2(x0 + 6.0, cy), 12.0, c(u.fg_dim));
-                    icons::draw(ui.painter(), if is_open { Icon::FolderOpen } else { Icon::Folder }, egui::pos2(x0 + 22.0, cy), 14.0, c(u.accent).gamma_multiply(0.85));
+                    icons::draw(ui.painter(), if is_open { Icon::ChevronDown } else { Icon::ChevronRight }, egui::pos2(x0 + 7.0, cy), 14.0, c(u.fg_dim));
+                    icons::draw_file(ui.painter(), icons::file_icon_key(&entry.path, true, is_open), egui::pos2(x0 + 24.0, cy), 16.0);
                 } else {
-                    let ext = entry.path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    icons::draw(ui.painter(), Icon::File, egui::pos2(x0 + 22.0, cy), 13.0, icons::file_color(&ext));
+                    icons::draw_file(ui.painter(), icons::file_icon_key(&entry.path, false, false), egui::pos2(x0 + 24.0, cy), 16.0);
                 }
                 let status = git.get(&entry.path).copied();
                 let name_col = match status {
@@ -272,7 +271,7 @@ impl Explorer {
                     Some('D') => c(u.git_deleted),
                     _ => c(u.fg),
                 };
-                ui.painter().text(egui::pos2(x0 + 36.0, cy), Align2::LEFT_CENTER, &entry.name, FontId::proportional(13.0), name_col);
+                ui.painter().text(egui::pos2(x0 + 38.0, cy), Align2::LEFT_CENTER, &entry.name, FontId::proportional(13.0), name_col);
                 if let Some(s) = status {
                     let col = match s {
                         'M' => c(u.git_modified),

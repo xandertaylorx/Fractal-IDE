@@ -119,7 +119,7 @@ const PALETTES: &[Palette] = &[
     Palette { name: "Synthwave '84", dark: true, bg: "#262335", side: "#1e1b2b", fg: "#f0eff1", comment: "#848bbd", string: "#ff8b39", number: "#f97e72", keyword: "#fede5d", func: "#36f9f6", ty: "#fe4450", var: "#ff7edb", op: "#fede5d", tag: "#72f1b8", attr: "#fede5d", accent: "#ff7edb", sel: "#463465" },
 ];
 
-pub const DEFAULT_THEME: &str = "Fractal Dark";
+pub const DEFAULT_THEME: &str = "Dark Modern";
 
 pub fn builtin_names() -> Vec<&'static str> {
     PALETTES.iter().map(|p| p.name).collect()
@@ -203,13 +203,83 @@ pub fn builtin(name: &str) -> Option<Theme> {
     Some(Theme { name: p.name.to_string(), dark: p.dark, ui, syntax: Arc::new(build_syntect(p.name, fg, bg, items)), default_fg: fg })
 }
 
-/// Import a VS Code color theme (`.json`, comments allowed).
+/// Parse a VS Code theme and merge everything it `include`s (parents first).
+fn load_merged(src: &str, resolver: &dyn Fn(&str) -> Option<String>, depth: u32) -> Option<serde_json::Value> {
+    let mut v = crate::jsonc::parse(src)?;
+    if depth > 4 {
+        return Some(v);
+    }
+    let Some(inc) = v.get("include").and_then(|i| i.as_str()).map(String::from) else { return Some(v) };
+    let Some(parent_src) = resolver(&inc) else { return Some(v) };
+    let mut base = load_merged(&parent_src, resolver, depth + 1)?;
+    // colors: child overrides parent
+    if let (Some(bc), Some(cc)) = (base.get("colors").cloned(), v.get("colors").and_then(|c| c.as_object()).cloned()) {
+        let mut merged = bc.as_object().cloned().unwrap_or_default();
+        for (k, val) in cc {
+            merged.insert(k, val);
+        }
+        base["colors"] = serde_json::Value::Object(merged);
+    } else if let Some(cc) = v.get("colors").cloned() {
+        base["colors"] = cc;
+    }
+    // token colors: parent rules first, child rules after
+    let mut tokens = base.get("tokenColors").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+    if let Some(ct) = v.get("tokenColors").and_then(|t| t.as_array()) {
+        tokens.extend(ct.iter().cloned());
+    }
+    base["tokenColors"] = serde_json::Value::Array(tokens);
+    if let Some(n) = v.get("name").cloned() {
+        base["name"] = n;
+    }
+    if let Some(t) = v.get("type").cloned() {
+        base["type"] = t;
+    }
+    v = base;
+    Some(v)
+}
+
+/// Import a VS Code color theme (`.json`, comments allowed, no `include`).
 pub fn from_vscode_json(src: &str, fallback_name: &str) -> Option<Theme> {
-    let v = crate::jsonc::parse(src)?;
+    from_vscode_json_with(src, fallback_name, &|_| None)
+}
+
+/// Official VS Code default themes, embedded.
+pub fn vscode_defaults() -> Vec<Theme> {
+    let files: [(&str, &str); 4] = [
+        ("dark_modern.json", include_str!("../themes/dark_modern.json")),
+        ("light_modern.json", include_str!("../themes/light_modern.json")),
+        ("dark_plus.json", include_str!("../themes/dark_plus.json")),
+        ("light_plus.json", include_str!("../themes/light_plus.json")),
+    ];
+    let resolver = |inc: &str| -> Option<String> {
+        let name = inc.rsplit('/').next()?;
+        Some(
+            match name {
+                "dark_plus.json" => include_str!("../themes/dark_plus.json"),
+                "dark_vs.json" => include_str!("../themes/dark_vs.json"),
+                "light_plus.json" => include_str!("../themes/light_plus.json"),
+                "light_vs.json" => include_str!("../themes/light_vs.json"),
+                _ => return None,
+            }
+            .to_string(),
+        )
+    };
+    files.iter().filter_map(|(n, src)| from_vscode_json_with(src, n, &resolver)).collect()
+}
+
+pub fn from_vscode_json_with(src: &str, fallback_name: &str, resolver: &dyn Fn(&str) -> Option<String>) -> Option<Theme> {
+    let v = load_merged(src, resolver, 0)?;
     let name = v.get("name").and_then(|n| n.as_str()).unwrap_or(fallback_name).to_string();
+    let bg_lum = v
+        .get("colors")
+        .and_then(|c| c.get("editor.background"))
+        .and_then(|b| b.as_str())
+        .and_then(parse_hex)
+        .map(|c| (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) / 255.0);
     let dark = match v.get("type").and_then(|t| t.as_str()) {
         Some("light") | Some("hc-light") => false,
-        _ => true,
+        Some("dark") | Some("hc") | Some("hc-black") => true,
+        _ => bg_lum.map_or(true, |l| l < 0.5),
     };
     let base = builtin(if dark { "Fractal Dark" } else { "Fractal Light" })?;
     let colors = v.get("colors").and_then(|c| c.as_object());
@@ -218,6 +288,30 @@ pub fn from_vscode_json(src: &str, fallback_name: &str) -> Option<Theme> {
         keys.iter().find_map(|k| c.get(*k).and_then(|x| x.as_str()).and_then(parse_hex))
     };
     let mut ui = base.ui.clone();
+    // Derive a coherent baseline from the theme's own primary colors first.
+    {
+        let toward: Rgba = if dark { [255, 255, 255, 255] } else { [0, 0, 0, 255] };
+        let bg = get(&["editor.background"]).unwrap_or(ui.bg);
+        let side = get(&["sideBar.background", "activityBar.background"]).unwrap_or(ui.bg_side);
+        let fg = get(&["editor.foreground", "foreground"]).unwrap_or(ui.fg);
+        let accent = get(&["button.background", "focusBorder", "activityBarBadge.background", "textLink.foreground"]).unwrap_or(ui.accent);
+        ui.bg = bg;
+        ui.bg_side = side;
+        ui.bg_title = side;
+        ui.bg_status = side;
+        ui.bg_panel = bg;
+        ui.fg = fg;
+        ui.accent = accent;
+        ui.cursor = accent;
+        ui.bg_tab = mix(side, bg, 0.3);
+        ui.bg_tab_active = bg;
+        ui.bg_hover = mix(side, toward, 0.07);
+        ui.bg_input = mix(bg, toward, 0.06);
+        ui.border = mix(bg, toward, 0.10);
+        ui.line_highlight = mix(bg, toward, 0.045);
+        ui.selection = mix(bg, accent, 0.32);
+        ui.find_match = with_alpha(mix(accent, [255, 200, 0, 255], 0.5), 90);
+    }
     let opaque = |c: Rgba, over: Rgba| -> Rgba {
         if c[3] == 255 {
             c
@@ -264,7 +358,7 @@ pub fn from_vscode_json(src: &str, fallback_name: &str) -> Option<Theme> {
     ui.fg_dim = mix(ui.fg, bg, 0.38);
     ui.fg_faint = mix(ui.fg, bg, 0.62);
     ui.fg_status = get(&["statusBar.foreground"]).unwrap_or(mix(ui.fg, bg, 0.2));
-    if let Some(c) = get(&["focusBorder", "button.background", "activityBarBadge.background", "textLink.foreground"]) {
+    if let Some(c) = get(&["button.background", "focusBorder", "activityBarBadge.background", "textLink.foreground"]) {
         ui.accent = c;
         ui.cursor = c;
     }
@@ -298,7 +392,7 @@ pub fn from_vscode_json(src: &str, fallback_name: &str) -> Option<Theme> {
     if let Some(c) = get(&["gitDecoration.deletedResourceForeground", "editorGutter.deletedBackground"]) {
         ui.git_deleted = c;
     }
-    ui.accent_fg = if dark { mix(bg, [0, 0, 0, 255], 0.5) } else { [255, 255, 255, 255] };
+    ui.accent_fg = get(&["button.foreground"]).unwrap_or(if dark { mix(bg, [0, 0, 0, 255], 0.5) } else { [255, 255, 255, 255] });
 
     let mut items = vec![];
     if let Some(arr) = v.get("tokenColors").and_then(|t| t.as_array()) {

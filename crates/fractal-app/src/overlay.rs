@@ -170,7 +170,12 @@ impl Overlay {
                             } else if resp.hovered() {
                                 ui.painter().rect_filled(rect, 6.0, c(u.bg_hover));
                             }
-                            let g = ui.painter().text(egui::pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, &it.label, FontId::proportional(13.5), c(u.fg));
+                            let mut tx = rect.left() + 12.0;
+                            if let Payload::File(p) = &it.payload {
+                                crate::icons::draw_file(ui.painter(), crate::icons::file_icon_key(p, false, false), egui::pos2(tx + 8.0, rect.center().y), 16.0);
+                                tx += 26.0;
+                            }
+                            let g = ui.painter().text(egui::pos2(tx, rect.center().y), Align2::LEFT_CENTER, &it.label, FontId::proportional(13.5), c(u.fg));
                             if !it.detail.is_empty() {
                                 ui.painter().with_clip_rect(rect).text(egui::pos2(g.right() + 10.0, rect.center().y), Align2::LEFT_CENTER, &it.detail, FontId::proportional(12.0), c(u.fg_faint));
                             }
